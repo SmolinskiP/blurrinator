@@ -38,6 +38,7 @@
             <span class="chip">uncertain {{ counts.uncertain|default:0 }}</span>
             <span class="chip">conflict {{ counts.conflict|default:0 }}</span>
             <span class="chip">manual overrides {{ override_count }}</span>
+            <span class="chip">manual blurs {{ manual_regions|length }}</span>
         </div>
         <div class="review-player">
             <video controls preload="metadata" class="review-video" data-review-video>
@@ -48,6 +49,52 @@
         <div class="review-editor-empty" data-empty-state>
             Select a detection from the list to inspect and adjust the blur box.
         </div>
+        <form method="post" action="{% url 'projects:add_manual_blur_region' project.slug %}" class="review-editor manual-blur-form" data-manual-form>
+            {% csrf_token %}
+            <div class="review-editor-head">
+                <div>
+                    <h3>Manual blur segment</h3>
+                    <div class="meta">Adds a blur box across a time range in final export.</div>
+                </div>
+                <div class="page-header-actions">
+                    <button type="button" class="btn btn-sm" data-use-current-frame>Use current frame</button>
+                    <button type="button" class="btn btn-sm btn-ghost" data-draw-manual-box>Draw box</button>
+                </div>
+            </div>
+            <div class="review-form-grid">
+                <label>
+                    <span>Start</span>
+                    <input type="number" min="0" step="0.01" name="start_seconds" data-manual-field="start_seconds" value="0">
+                </label>
+                <label>
+                    <span>End</span>
+                    <input type="number" min="0" step="0.01" name="end_seconds" data-manual-field="end_seconds" value="2">
+                </label>
+                <label>
+                    <span>X</span>
+                    <input type="number" min="0" name="x" data-manual-field="x" value="0">
+                </label>
+                <label>
+                    <span>Y</span>
+                    <input type="number" min="0" name="y" data-manual-field="y" value="0">
+                </label>
+                <label>
+                    <span>Width</span>
+                    <input type="number" min="1" name="width" data-manual-field="width" value="160">
+                </label>
+                <label>
+                    <span>Height</span>
+                    <input type="number" min="1" name="height" data-manual-field="height" value="160">
+                </label>
+                <label class="review-form-span">
+                    <span>Note</span>
+                    <input type="text" maxlength="240" name="note" data-manual-field="note" placeholder="Optional label for this missed face">
+                </label>
+            </div>
+            <div class="page-header-actions">
+                <button type="submit" class="btn btn-primary">Add manual blur</button>
+            </div>
+        </form>
         <form method="post" class="review-editor" data-editor hidden>
             {% csrf_token %}
             <div class="review-editor-head">
@@ -100,60 +147,105 @@
 
     <aside class="card card-padded review-list-card">
         <div class="section-title">
-            <h2>Detections</h2>
+            <h2>Manual blurs</h2>
         </div>
-        <div class="review-filters">
-            <button type="button" class="btn btn-sm btn-ghost is-active" data-filter="all">All</button>
-            <button type="button" class="btn btn-sm btn-ghost" data-filter="flagged">Flagged</button>
-            <button type="button" class="btn btn-sm btn-ghost" data-filter="override">Overrides</button>
-        </div>
-        <div class="review-list">
-            {% for row in detections %}
-                <button
-                    type="button"
-                    class="review-detection-item"
-                    id="det-{{ row.id }}"
-                    data-detection-item
-                    data-id="{{ row.id }}"
-                    data-save-url="{% url 'projects:save_detection_override' project.slug row.id %}"
-                    data-reset-url="{% url 'projects:reset_detection_override' project.slug row.id %}"
-                    data-time="{{ row.timestamp_seconds }}"
-                    data-time-label="{{ row.timestamp_label }}"
-                    data-frame="{{ row.frame_index }}"
-                    data-score="{{ row.score|floatformat:2 }}"
-                    data-similarity="{% if row.similarity %}{{ row.similarity|floatformat:2 }}{% endif %}"
-                    data-person="{{ row.matched_person }}"
-                    data-auto-decision="{{ row.auto_decision }}"
-                    data-auto-label="{{ row.auto_decision_label }}"
-                    data-effective-decision="{{ row.effective_decision }}"
-                    data-effective-label="{{ row.effective_decision_label }}"
-                    data-x="{{ row.x }}"
-                    data-y="{{ row.y }}"
-                    data-width="{{ row.width }}"
-                    data-height="{{ row.height }}"
-                    data-note="{{ row.override_note }}"
-                    data-has-override="{% if row.has_override %}1{% else %}0{% endif %}"
+        <div class="review-list manual-region-list">
+            {% for region in manual_regions %}
+                <div
+                    class="review-detection-item manual-region-item"
+                    id="manual-{{ region.id }}"
+                    data-manual-item
+                    data-time="{{ region.start_seconds }}"
+                    data-start="{{ region.start_seconds }}"
+                    data-end="{{ region.end_seconds }}"
+                    data-x="{{ region.x }}"
+                    data-y="{{ region.y }}"
+                    data-width="{{ region.width }}"
+                    data-height="{{ region.height }}"
+                    data-note="{{ region.note }}"
                 >
-                    <div class="review-detection-head">
-                        <span class="detection-time">{{ row.timestamp_label }}</span>
-                        <span class="status-pill {% if row.effective_decision == 'allowed' %}done{% elif row.effective_decision == 'unknown' %}failed{% else %}queued{% endif %}">
-                            {{ row.effective_decision_label }}
-                        </span>
-                    </div>
-                    <div class="review-detection-meta">
-                        frame {{ row.frame_index }} · {{ row.width }}×{{ row.height }} at {{ row.x }},{{ row.y }}
-                    </div>
-                    <div class="review-detection-meta">
-                        score {{ row.score|floatformat:2 }}{% if row.similarity %} · sim {{ row.similarity|floatformat:2 }}{% endif %}{% if row.matched_person %} · {{ row.matched_person }}{% endif %}
-                    </div>
-                    {% if row.has_override %}
-                        <div class="review-detection-meta review-detection-override">Manual override active</div>
-                    {% endif %}
-                </button>
+                    <button type="button" class="manual-region-select" data-manual-select>
+                        <div class="review-detection-head">
+                            <span class="detection-time">{{ region.start_label }}-{{ region.end_label }}</span>
+                            <span class="status-pill failed">Manual blur</span>
+                        </div>
+                        <div class="review-detection-meta">
+                            {{ region.width }}x{{ region.height }} at {{ region.x }},{{ region.y }}{% if region.note %} · {{ region.note }}{% endif %}
+                        </div>
+                    </button>
+                    <form method="post" action="{% url 'projects:delete_manual_blur_region' project.slug region.id %}" class="inline-form">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-danger">Remove</button>
+                    </form>
+                </div>
             {% empty %}
-                <div class="meta">No detections available for this analysis run.</div>
+                <div class="meta manual-empty">No manual blur segments yet.</div>
             {% endfor %}
         </div>
+        <div class="section-title">
+            <h2>Detections</h2>
+        </div>
+        <form method="post" action="{% url 'projects:bulk_allow_detections' project.slug %}" data-bulk-form>
+            {% csrf_token %}
+            <div class="review-filters">
+                <button type="button" class="btn btn-sm btn-ghost is-active" data-filter="all">All</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-filter="flagged">Flagged</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-filter="override">Overrides</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-clear-selection>Clear</button>
+                <button type="submit" class="btn btn-sm btn-primary" data-bulk-submit disabled>Allow selected</button>
+            </div>
+            <div class="review-list">
+                {% for row in detections %}
+                    <div
+                        class="review-detection-item"
+                        id="det-{{ row.id }}"
+                        data-detection-item
+                        data-id="{{ row.id }}"
+                        data-save-url="{% url 'projects:save_detection_override' project.slug row.id %}"
+                        data-reset-url="{% url 'projects:reset_detection_override' project.slug row.id %}"
+                        data-time="{{ row.timestamp_seconds }}"
+                        data-time-label="{{ row.timestamp_label }}"
+                        data-frame="{{ row.frame_index }}"
+                        data-score="{{ row.score|floatformat:2 }}"
+                        data-similarity="{% if row.similarity %}{{ row.similarity|floatformat:2 }}{% endif %}"
+                        data-person="{{ row.matched_person }}"
+                        data-auto-decision="{{ row.auto_decision }}"
+                        data-auto-label="{{ row.auto_decision_label }}"
+                        data-effective-decision="{{ row.effective_decision }}"
+                        data-effective-label="{{ row.effective_decision_label }}"
+                        data-x="{{ row.x }}"
+                        data-y="{{ row.y }}"
+                        data-width="{{ row.width }}"
+                        data-height="{{ row.height }}"
+                        data-note="{{ row.override_note }}"
+                        data-has-override="{% if row.has_override %}1{% else %}0{% endif %}"
+                    >
+                        <label class="review-selection" title="Select for bulk allow">
+                            <input type="checkbox" name="detection_ids" value="{{ row.id }}" data-detection-checkbox>
+                        </label>
+                        <button type="button" class="review-detection-select" data-detection-select>
+                            <div class="review-detection-head">
+                                <span class="detection-time">{{ row.timestamp_label }}</span>
+                                <span class="status-pill {% if row.effective_decision == 'allowed' %}done{% elif row.effective_decision == 'unknown' %}failed{% else %}queued{% endif %}">
+                                    {{ row.effective_decision_label }}
+                                </span>
+                            </div>
+                            <div class="review-detection-meta">
+                                frame {{ row.frame_index }} · {{ row.width }}×{{ row.height }} at {{ row.x }},{{ row.y }}
+                            </div>
+                            <div class="review-detection-meta">
+                                score {{ row.score|floatformat:2 }}{% if row.similarity %} · sim {{ row.similarity|floatformat:2 }}{% endif %}{% if row.matched_person %} · {{ row.matched_person }}{% endif %}
+                            </div>
+                            {% if row.has_override %}
+                                <div class="review-detection-meta review-detection-override">Manual override active</div>
+                            {% endif %}
+                        </button>
+                    </div>
+                {% empty %}
+                    <div class="meta">No detections available for this analysis run.</div>
+                {% endfor %}
+            </div>
+        </form>
     </aside>
 </div>
 {% endblock %}
@@ -165,8 +257,9 @@
     const video = document.querySelector("[data-review-video]");
     const overlay = document.querySelector("[data-review-overlay]");
     const form = document.querySelector("[data-editor]");
+    const manualForm = document.querySelector("[data-manual-form]");
     const emptyState = document.querySelector("[data-empty-state]");
-    if (!items.length || !video || !overlay || !form || !emptyState) {
+    if (!video || !overlay || !form || !manualForm || !emptyState) {
         return;
     }
 
@@ -184,17 +277,38 @@
     const autoChip = form.querySelector("[data-editor-auto]");
     const overrideChip = form.querySelector("[data-editor-override]");
     const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
+    const detectionCheckboxes = Array.from(document.querySelectorAll("[data-detection-checkbox]"));
+    const bulkSubmit = document.querySelector("[data-bulk-submit]");
+    const clearSelectionButton = document.querySelector("[data-clear-selection]");
+    const manualItems = Array.from(document.querySelectorAll("[data-manual-item]"));
+    const manualFields = {
+        start: manualForm.querySelector("[data-manual-field='start_seconds']"),
+        end: manualForm.querySelector("[data-manual-field='end_seconds']"),
+        x: manualForm.querySelector("[data-manual-field='x']"),
+        y: manualForm.querySelector("[data-manual-field='y']"),
+        width: manualForm.querySelector("[data-manual-field='width']"),
+        height: manualForm.querySelector("[data-manual-field='height']"),
+        note: manualForm.querySelector("[data-manual-field='note']"),
+    };
     let selectedItem = null;
+    let pendingSeekSeconds = null;
+    let activeBoxSource = "manual";
+    let drawManualBox = false;
+    let dragStart = null;
+    const drawButton = manualForm.querySelector("[data-draw-manual-box]");
 
-    const getBox = () => ({
-        x: Number(fields.x.value || "0"),
-        y: Number(fields.y.value || "0"),
-        width: Number(fields.width.value || "0"),
-        height: Number(fields.height.value || "0"),
-    });
+    const readBox = (source) => {
+        const boxFields = source === "manual" ? manualFields : fields;
+        return {
+            x: Number(boxFields.x.value || "0"),
+            y: Number(boxFields.y.value || "0"),
+            width: Number(boxFields.width.value || "0"),
+            height: Number(boxFields.height.value || "0"),
+        };
+    };
 
     const syncOverlay = () => {
-        const box = getBox();
+        const box = readBox(activeBoxSource);
         const rect = video.getBoundingClientRect();
         const intrinsicWidth = video.videoWidth || 1;
         const intrinsicHeight = video.videoHeight || 1;
@@ -206,10 +320,29 @@
         overlay.style.height = `${box.height * scaleY}px`;
     };
 
+    const seekVideo = (seconds) => {
+        pendingSeekSeconds = seconds;
+        const applySeek = () => {
+            if (pendingSeekSeconds === null) {
+                return;
+            }
+            video.pause();
+            video.currentTime = pendingSeekSeconds;
+            pendingSeekSeconds = null;
+        };
+        if (video.readyState >= 1) {
+            applySeek();
+            return;
+        }
+        video.addEventListener("loadedmetadata", applySeek, { once: true });
+        video.load();
+    };
+
     const setSelected = (item) => {
         selectedItem?.classList.remove("is-selected");
         selectedItem = item;
         item.classList.add("is-selected");
+        activeBoxSource = "detection";
         emptyState.hidden = true;
         form.hidden = false;
         form.action = item.dataset.saveUrl;
@@ -224,18 +357,116 @@
         fields.width.value = item.dataset.width;
         fields.height.value = item.dataset.height;
         fields.note.value = item.dataset.note || "";
-        video.currentTime = Number(item.dataset.time || "0");
+        seekVideo(Number(item.dataset.time || "0"));
+        syncOverlay();
+    };
+
+    const setManualFromDataset = (item) => {
+        activeBoxSource = "manual";
+        manualItems.forEach((el) => el.classList.toggle("is-selected", el === item));
+        manualFields.start.value = Number(item.dataset.start || "0").toFixed(2);
+        manualFields.end.value = Number(item.dataset.end || "0").toFixed(2);
+        manualFields.x.value = item.dataset.x || "0";
+        manualFields.y.value = item.dataset.y || "0";
+        manualFields.width.value = item.dataset.width || "160";
+        manualFields.height.value = item.dataset.height || "160";
+        manualFields.note.value = item.dataset.note || "";
+        seekVideo(Number(item.dataset.time || "0"));
         syncOverlay();
     };
 
     items.forEach((item) => {
-        item.addEventListener("click", () => setSelected(item));
+        item.querySelector("[data-detection-select]")?.addEventListener("click", () => setSelected(item));
+    });
+    manualItems.forEach((item) => {
+        const button = item.querySelector("[data-manual-select]");
+        button?.addEventListener("click", () => setManualFromDataset(item));
     });
 
     [fields.x, fields.y, fields.width, fields.height].forEach((field) => {
-        field.addEventListener("input", syncOverlay);
+        field.addEventListener("input", () => {
+            activeBoxSource = "detection";
+            syncOverlay();
+        });
+    });
+    [manualFields.x, manualFields.y, manualFields.width, manualFields.height].forEach((field) => {
+        field.addEventListener("input", () => {
+            activeBoxSource = "manual";
+            syncOverlay();
+        });
+        field.addEventListener("focus", () => {
+            activeBoxSource = "manual";
+            syncOverlay();
+        });
+    });
+    manualForm.querySelector("[data-use-current-frame]")?.addEventListener("click", () => {
+        activeBoxSource = "manual";
+        const current = Number(video.currentTime || "0");
+        const duration = Number(video.duration || "0");
+        manualFields.start.value = current.toFixed(2);
+        manualFields.end.value = (duration ? Math.min(duration, current + 2) : current + 2).toFixed(2);
+        if (video.videoWidth && video.videoHeight) {
+            const size = Math.max(80, Math.round(Math.min(video.videoWidth, video.videoHeight) * 0.18));
+            manualFields.width.value = size;
+            manualFields.height.value = size;
+            manualFields.x.value = Math.max(0, Math.round((video.videoWidth - size) / 2));
+            manualFields.y.value = Math.max(0, Math.round((video.videoHeight - size) / 3));
+        }
+        syncOverlay();
+    });
+    drawButton?.addEventListener("click", () => {
+        drawManualBox = !drawManualBox;
+        activeBoxSource = "manual";
+        drawButton.classList.toggle("is-active", drawManualBox);
+        syncOverlay();
+    });
+
+    const eventToVideoPoint = (event) => {
+        const rect = video.getBoundingClientRect();
+        const scaleX = (video.videoWidth || 1) / rect.width;
+        const scaleY = (video.videoHeight || 1) / rect.height;
+        return {
+            x: Math.max(0, Math.min(video.videoWidth || 1, Math.round((event.clientX - rect.left) * scaleX))),
+            y: Math.max(0, Math.min(video.videoHeight || 1, Math.round((event.clientY - rect.top) * scaleY))),
+        };
+    };
+
+    video.addEventListener("pointerdown", (event) => {
+        if (!drawManualBox || !video.videoWidth || !video.videoHeight) {
+            return;
+        }
+        event.preventDefault();
+        video.pause();
+        activeBoxSource = "manual";
+        dragStart = eventToVideoPoint(event);
+        video.setPointerCapture(event.pointerId);
+    });
+    video.addEventListener("pointermove", (event) => {
+        if (!dragStart) {
+            return;
+        }
+        event.preventDefault();
+        const point = eventToVideoPoint(event);
+        const x0 = Math.min(dragStart.x, point.x);
+        const y0 = Math.min(dragStart.y, point.y);
+        const x1 = Math.max(dragStart.x, point.x);
+        const y1 = Math.max(dragStart.y, point.y);
+        manualFields.x.value = x0;
+        manualFields.y.value = y0;
+        manualFields.width.value = Math.max(1, x1 - x0);
+        manualFields.height.value = Math.max(1, y1 - y0);
+        syncOverlay();
+    });
+    video.addEventListener("pointerup", (event) => {
+        if (!dragStart) {
+            return;
+        }
+        event.preventDefault();
+        dragStart = null;
+        video.releasePointerCapture(event.pointerId);
     });
     video.addEventListener("loadedmetadata", syncOverlay);
+    video.addEventListener("seeked", syncOverlay);
     window.addEventListener("resize", syncOverlay);
 
     const applyFilter = (name) => {
@@ -253,13 +484,52 @@
         });
     };
 
+    const isVisibleItem = (item) => {
+        return item.offsetParent !== null && !item.hidden;
+    };
+
+    const syncBulkState = () => {
+        const selected = detectionCheckboxes.filter((checkbox) => checkbox.checked).length;
+        if (bulkSubmit) {
+            bulkSubmit.disabled = selected === 0;
+            bulkSubmit.textContent = selected ? `Allow selected (${selected})` : "Allow selected";
+        }
+        detectionCheckboxes.forEach((checkbox) => {
+            checkbox.closest("[data-detection-item]")?.classList.toggle("is-bulk-selected", checkbox.checked);
+        });
+    };
+
+    detectionCheckboxes.forEach((checkbox) => {
+        checkbox.addEventListener("change", syncBulkState);
+    });
+    clearSelectionButton?.addEventListener("click", () => {
+        detectionCheckboxes.forEach((checkbox) => {
+            checkbox.checked = false;
+        });
+        syncBulkState();
+    });
+
     filterButtons.forEach((button) => {
         button.addEventListener("click", () => applyFilter(button.dataset.filter));
     });
+    syncBulkState();
 
     applyFilter("flagged");
     const hashTarget = window.location.hash ? document.querySelector(window.location.hash) : null;
-    setSelected(hashTarget && hashTarget.matches("[data-detection-item]") ? hashTarget : items[0]);
+    if (hashTarget && hashTarget.matches("[data-manual-item]")) {
+        setManualFromDataset(hashTarget);
+    } else if (hashTarget && hashTarget.matches("[data-detection-item]")) {
+        setSelected(hashTarget);
+    } else {
+        const visibleItems = items.filter(isVisibleItem);
+        const firstItem = visibleItems[0] || items[0];
+        if (firstItem) {
+            setSelected(firstItem);
+        } else {
+            activeBoxSource = "manual";
+            syncOverlay();
+        }
+    }
 })();
 </script>
 {% endblock %}

@@ -19,6 +19,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.humanize",
     "django_q",
+    "users",
     "projects",
     "registry",
     "allowlist",
@@ -30,6 +31,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "users.middleware.RequireLoginMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -116,7 +118,9 @@ FFPROBE_BINARY = os.environ.get("BLURRINATOR_FFPROBE_BINARY", "ffprobe")
 FFMPEG_BINARY = os.environ.get("BLURRINATOR_FFMPEG_BINARY", "ffmpeg")
 REQUIRE_GPU_PIPELINE = os.environ.get("BLURRINATOR_REQUIRE_GPU_PIPELINE", "1") == "1"
 
-LOGIN_URL = "/admin/login/"
+LOGIN_URL = "/users/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/users/login/"
 
 Q_CLUSTER = {
     "name": "blurrinator",

@@ -17,12 +17,28 @@
         <form method="post" class="form">
             {% csrf_token %}
             {% for field in form %}
-                <div class="field">
-                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-                    {{ field }}
-                    {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
-                    {% if field.errors %}<div class="errors">{{ field.errors|join:" " }}</div>{% endif %}
-                </div>
+                {% if field.name == "is_active" %}
+                    <div class="field">
+                        <label class="toggle-field" for="{{ field.id_for_label }}">
+                            <span class="toggle-copy">
+                                <span class="toggle-title">{{ field.label }}</span>
+                                <span class="toggle-help">Keep this person eligible for allowlist matching and unblurred output.</span>
+                            </span>
+                            <span class="toggle-control">
+                                {{ field }}
+                                <span class="toggle-slider" aria-hidden="true"></span>
+                            </span>
+                        </label>
+                        {% if field.errors %}<div class="errors">{{ field.errors|join:" " }}</div>{% endif %}
+                    </div>
+                {% else %}
+                    <div class="field">
+                        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                        {{ field }}
+                        {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+                        {% if field.errors %}<div class="errors">{{ field.errors|join:" " }}</div>{% endif %}
+                    </div>
+                {% endif %}
             {% endfor %}
             <div class="form-actions">
                 <a href="{% url 'allowlist:index' %}" class="btn btn-ghost">Cancel</a>

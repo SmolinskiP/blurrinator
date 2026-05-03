@@ -23,8 +23,16 @@
             </nav>
             <div class="topbar-spacer"></div>
             <div class="topbar-meta">
-                <span><span class="dot"></span> Worker queue</span>
-                <span class="mono">{% now "Y-m-d H:i" %}</span>
+                {% if request.user.is_authenticated %}
+                    <span><span class="dot"></span> Worker queue</span>
+                    <span class="mono">{{ request.user.username }} · {% if request.user.is_staff %}admin{% else %}user{% endif %}</span>
+                    <form method="post" action="{% url 'users:logout' %}" class="inline-form">
+                        {% csrf_token %}
+                        <button type="submit" class="nav-logout">Logout</button>
+                    </form>
+                {% else %}
+                    <span class="mono">{% now "Y-m-d H:i" %}</span>
+                {% endif %}
             </div>
         </div>
     </header>

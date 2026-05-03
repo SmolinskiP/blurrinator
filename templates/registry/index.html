@@ -6,10 +6,7 @@
 <div class="page-header">
     <div>
         <h1>Model registry</h1>
-        <p>Every model used by the pipeline is registered with its license, version and weight hash. Manage entries from the Django admin.</p>
-    </div>
-    <div class="page-header-actions">
-        <a class="btn btn-ghost" href="/admin/registry/modelentry/add/">+ Register model</a>
+        <p>Every model used by the pipeline is registered with its license, version and weight hash.</p>
     </div>
 </div>
 
@@ -41,8 +38,7 @@
 {% else %}
     <div class="empty">
         <h2>Registry is empty</h2>
-        <p>Register YuNet, SFace, YOLO11 detect/seg/pose and the tracker before running analysis. Each entry must include license and weights hash.</p>
-        <a class="btn btn-primary" href="/admin/registry/modelentry/add/">+ Register model</a>
+        <p>Use the fetch models command to register YuNet and SFace before running analysis. Each entry must include license and weights hash.</p>
     </div>
 {% endif %}
 {% endblock %}

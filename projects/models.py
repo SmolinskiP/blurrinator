@@ -177,3 +177,21 @@ class DetectionOverride(models.Model):
 
     class Meta:
         ordering = ["detection__timestamp_seconds", "detection_id"]
+
+
+class ManualBlurRegion(models.Model):
+    project = models.ForeignKey(
+        Project, on_delete=models.CASCADE, related_name="manual_blur_regions"
+    )
+    start_seconds = models.FloatField()
+    end_seconds = models.FloatField()
+    x = models.PositiveIntegerField()
+    y = models.PositiveIntegerField()
+    width = models.PositiveIntegerField()
+    height = models.PositiveIntegerField()
+    note = models.CharField(max_length=240, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["start_seconds", "id"]

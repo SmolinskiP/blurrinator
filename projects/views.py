@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import mimetypes
 from pathlib import Path
 
 from django.contrib import messages
 from django.db import connection, models
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
 from django.http import JsonResponse
 from django.template.loader import render_to_string
 from django.shortcuts import get_object_or_404, redirect, render
@@ -15,7 +16,7 @@ from django.views.generic import ListView
 from django_q.tasks import async_task
 
 from .forms import ProjectUploadForm
-from .models import AnalysisJob, ExportJob, FaceDetection, Project
+from .models import AnalysisJob, ExportJob, FaceDetection, ManualBlurRegion, Project
 from .runtime import gpu_requirement_error
 from .services import (
     apply_detection_override,
@@ -75,7 +76,7 @@ def _job_preview_rows(job: AnalysisJob, limit: int = 14) -> list[dict]:
                 "decision": detection.get_decision_display(),
                 "score": detection.score,
                 "similarity": detection.similarity,
-                "matched_person": detection.matched_person.name if detection.matched_person else "",
+                "matched_person": detection.matched_person.display_name if detection.matched_person else "",
             }
         )
     return rows
@@ -84,6 +85,67 @@ def _job_preview_rows(job: AnalysisJob, limit: int = 14) -> list[dict]:
 def _log_lines(text: str, limit: int = 80) -> list[str]:
     lines = [line for line in text.splitlines() if line.strip()]
     return lines[-limit:]
+
+
+def _file_chunker(handle, *, offset: int = 0, length: int | None = None, chunk_size: int = 8192):
+    try:
+        handle.seek(offset)
+        remaining = length
+        while True:
+            if remaining is not None and remaining <= 0:
+                break
+            read_size = chunk_size if remaining is None else min(chunk_size, remaining)
+            data = handle.read(read_size)
+            if not data:
+                break
+            if remaining is not None:
+                remaining -= len(data)
+            yield data
+    finally:
+        handle.close()
+
+
+def _video_response(request, path: Path):
+    if not path.exists():
+        raise Http404("Video file missing on disk.")
+
+    size = path.stat().st_size
+    content_type = mimetypes.guess_type(path.name)[0] or "video/mp4"
+    range_header = request.headers.get("Range", "").strip()
+    if not range_header or not range_header.startswith("bytes="):
+        response = FileResponse(path.open("rb"), as_attachment=False, filename=path.name, content_type=content_type)
+        response["Accept-Ranges"] = "bytes"
+        response["Content-Length"] = str(size)
+        return response
+
+    try:
+        start_text, end_text = range_header.removeprefix("bytes=").split("-", 1)
+        if start_text == "":
+            length = min(size, int(end_text))
+            start = max(0, size - length)
+            end = size - 1
+        else:
+            start = int(start_text)
+            end = int(end_text) if end_text else size - 1
+    except ValueError:
+        return HttpResponse(status=416)
+
+    if start < 0 or end < start or start >= size:
+        response = HttpResponse(status=416)
+        response["Content-Range"] = f"bytes */{size}"
+        return response
+
+    end = min(end, size - 1)
+    length = end - start + 1
+    response = StreamingHttpResponse(
+        _file_chunker(path.open("rb"), offset=start, length=length),
+        status=206,
+        content_type=content_type,
+    )
+    response["Accept-Ranges"] = "bytes"
+    response["Content-Length"] = str(length)
+    response["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return response
 
 
 def _format_timestamp(seconds: float) -> str:
@@ -313,7 +375,7 @@ def draft_review(request, slug: str):
                 "timestamp_label": _format_timestamp(detection.timestamp_seconds),
                 "score": detection.score,
                 "similarity": detection.similarity,
-                "matched_person": detection.matched_person.name if detection.matched_person else "",
+                "matched_person": detection.matched_person.display_name if detection.matched_person else "",
                 "auto_decision": detection.decision,
                 "auto_decision_label": detection.get_decision_display(),
                 "effective_decision": effective.decision,
@@ -326,6 +388,21 @@ def draft_review(request, slug: str):
                 "override_note": detection.override.note if getattr(detection, "override", None) else "",
             }
         )
+    manual_regions = [
+        {
+            "id": region.pk,
+            "start_seconds": region.start_seconds,
+            "end_seconds": region.end_seconds,
+            "start_label": _format_timestamp(region.start_seconds),
+            "end_label": _format_timestamp(region.end_seconds),
+            "x": region.x,
+            "y": region.y,
+            "width": region.width,
+            "height": region.height,
+            "note": region.note,
+        }
+        for region in project.manual_blur_regions.all()
+    ]
 
     return render(
         request,
@@ -336,6 +413,7 @@ def draft_review(request, slug: str):
             "detections": detections,
             "counts": counts,
             "override_count": override_count,
+            "manual_regions": manual_regions,
             "source_url": reverse("projects:source_video", args=[project.slug]),
         },
     )
@@ -398,6 +476,97 @@ def reset_detection_override(request, slug: str, detection_id: int):
     return redirect(f"{reverse('projects:draft_review', args=[project.slug])}#det-{detection.pk}")
 
 
+@require_POST
+def bulk_allow_detections(request, slug: str):
+    project = get_object_or_404(Project, slug=slug)
+    latest_done_job = _latest_done_analysis(project)
+    if latest_done_job is None:
+        messages.error(request, "Run analysis to completion before editing draft review.")
+        return redirect(project.get_absolute_url())
+
+    detection_ids = []
+    for raw_id in request.POST.getlist("detection_ids"):
+        try:
+            detection_ids.append(int(raw_id))
+        except ValueError:
+            continue
+    if not detection_ids:
+        messages.error(request, "Select at least one detection.")
+        return redirect(reverse("projects:draft_review", args=[project.slug]))
+
+    detections = (
+        latest_done_job.detections
+        .filter(pk__in=detection_ids)
+        .select_related("job__project")
+    )
+    updated = 0
+    for detection in detections:
+        apply_detection_override(
+            detection,
+            decision=FaceDetection.Decision.ALLOWED,
+            x=detection.x,
+            y=detection.y,
+            width=detection.width,
+            height=detection.height,
+            note="Bulk allowed in draft review.",
+        )
+        updated += 1
+
+    messages.success(request, f"Marked {updated} detection(s) as allowed.")
+    return redirect(reverse("projects:draft_review", args=[project.slug]))
+
+
+@require_POST
+def add_manual_blur_region(request, slug: str):
+    project = get_object_or_404(Project.objects.select_related("source"), slug=slug)
+    if not _latest_done_analysis(project):
+        messages.error(request, "Run analysis to completion before adding manual blur regions.")
+        return redirect(project.get_absolute_url())
+
+    try:
+        start_seconds = max(0.0, float(request.POST.get("start_seconds", "0")))
+        end_seconds = max(0.0, float(request.POST.get("end_seconds", "0")))
+        x = max(0, int(request.POST.get("x", "0")))
+        y = max(0, int(request.POST.get("y", "0")))
+        width = max(1, int(request.POST.get("width", "1")))
+        height = max(1, int(request.POST.get("height", "1")))
+    except ValueError:
+        messages.error(request, "Manual blur region needs numeric time and box values.")
+        return redirect(reverse("projects:draft_review", args=[project.slug]))
+
+    if end_seconds <= start_seconds:
+        end_seconds = start_seconds + 1.0
+
+    source = getattr(project, "source", None)
+    if source and source.width and source.height:
+        x = min(x, source.width - 1)
+        y = min(y, source.height - 1)
+        width = min(width, source.width - x)
+        height = min(height, source.height - y)
+
+    region = ManualBlurRegion.objects.create(
+        project=project,
+        start_seconds=start_seconds,
+        end_seconds=end_seconds,
+        x=x,
+        y=y,
+        width=width,
+        height=height,
+        note=request.POST.get("note", "").strip(),
+    )
+    messages.success(request, "Manual blur segment added.")
+    return redirect(f"{reverse('projects:draft_review', args=[project.slug])}#manual-{region.pk}")
+
+
+@require_POST
+def delete_manual_blur_region(request, slug: str, region_id: int):
+    project = get_object_or_404(Project, slug=slug)
+    region = get_object_or_404(ManualBlurRegion, pk=region_id, project=project)
+    region.delete()
+    messages.success(request, "Manual blur segment removed.")
+    return redirect(reverse("projects:draft_review", args=[project.slug]))
+
+
 def project_status(request, slug: str):
     project = get_object_or_404(
         Project.objects.select_related("source").prefetch_related("analysis_jobs", "exports"),
@@ -432,9 +601,7 @@ def stream_source_video(request, slug: str):
     if not source:
         raise Http404("Source not ready.")
     path = Path(source.absolute_path)
-    if not path.exists():
-        raise Http404("Source file missing on disk.")
-    return FileResponse(path.open("rb"), as_attachment=False, filename=path.name)
+    return _video_response(request, path)
 
 
 def stream_export(request, pk: int):
@@ -442,6 +609,4 @@ def stream_export(request, pk: int):
     if not export.is_done or not export.output_path:
         raise Http404("Export not ready.")
     path = Path(export.output_path)
-    if not path.exists():
-        raise Http404("Export file missing on disk.")
-    return FileResponse(path.open("rb"), as_attachment=False, filename=path.name)
+    return _video_response(request, path)

@@ -16,18 +16,8 @@
                 <button type="submit" class="btn">Run analysis</button>
             </form>
             {% if review_job %}
-                <a href="{% url 'projects:draft_review' project.slug %}" class="btn btn-ghost">Draft review</a>
+                <a href="{% url 'projects:draft_review' project.slug %}" class="btn">Draft review</a>
             {% endif %}
-            <form method="post" action="{% url 'projects:export_final' project.slug %}" class="inline-form">
-                {% csrf_token %}
-                <select name="style" class="select-sm" title="Redaction style">
-                    <option value="mosaic">Mosaic</option>
-                    <option value="gaussian">Gaussian blur</option>
-                    <option value="solid">Solid fill</option>
-                    <option value="eye_bar">Eye bar</option>
-                </select>
-                <button type="submit" class="btn btn-primary">Final export</button>
-            </form>
         {% endif %}
         <form method="post" action="{% url 'projects:delete' project.slug %}" class="inline-form"
               onsubmit="return confirm('Delete project, original and all artifacts?');">

@@ -22,6 +22,21 @@ urlpatterns = [
         views.reset_detection_override,
         name="reset_detection_override",
     ),
+    path(
+        "p/<slug:slug>/draft/detections/bulk-allow/",
+        views.bulk_allow_detections,
+        name="bulk_allow_detections",
+    ),
+    path(
+        "p/<slug:slug>/draft/manual-blurs/add/",
+        views.add_manual_blur_region,
+        name="add_manual_blur_region",
+    ),
+    path(
+        "p/<slug:slug>/draft/manual-blurs/<int:region_id>/delete/",
+        views.delete_manual_blur_region,
+        name="delete_manual_blur_region",
+    ),
     path("p/<slug:slug>/export/final/", views.queue_final_export, name="export_final"),
     path("p/<slug:slug>/delete/", views.delete_project, name="delete"),
     path("exports/<int:pk>/download/", views.download_export, name="download_export"),

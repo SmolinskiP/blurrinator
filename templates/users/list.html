@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+
+{% block title %}Users · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Users</h1>
+        <p>Application accounts. Admins can manage users and reset passwords.</p>
+    </div>
+    {% if request.user.is_staff %}
+        <div class="page-header-actions">
+            <a href="{% url 'users:new' %}" class="btn btn-primary">New user</a>
+        </div>
+    {% endif %}
+</div>
+
+<div class="card card-padded">
+    <table class="list-table">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Last login</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+                <tr>
+                    <td class="mono">{{ user.username }}</td>
+                    <td>{{ user.get_full_name|default:"-" }}</td>
+                    <td>{{ user.email|default:"-" }}</td>
+                    <td>
+                        <span class="chip">{% if user.is_staff %}admin{% else %}user{% endif %}</span>
+                    </td>
+                    <td>
+                        <span class="status-pill {% if user.is_active %}done{% else %}failed{% endif %}">
+                            {% if user.is_active %}Active{% else %}Disabled{% endif %}
+                        </span>
+                    </td>
+                    <td>{% if user.last_login %}{{ user.last_login|date:"M j H:i" }}{% else %}-{% endif %}</td>
+                    <td style="text-align: right;">
+                        {% if request.user.is_staff %}
+                            <a href="{% url 'users:password_reset' user.pk %}" class="btn btn-sm">Reset password</a>
+                            <form method="post" action="{% url 'users:delete' user.pk %}" class="inline-form"
+                                  onsubmit="return confirm('Delete user {{ user.username|escapejs }}?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                            </form>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="7">No users yet.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

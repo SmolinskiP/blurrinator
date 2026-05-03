@@ -17,6 +17,7 @@ from .models import (
     DetectionOverride,
     ExportJob,
     FaceDetection,
+    ManualBlurRegion,
     Project,
     SourceVideo,
 )
@@ -529,9 +530,25 @@ def render_final_export(export_id: int) -> None:
                         score=effective.score,
                     )
                 )
+        fps_for_manual = source.fps or 30.0
+        manual_regions = list(project.manual_blur_regions.all())
+        for manual in manual_regions:
+            start_frame = max(0, int(manual.start_seconds * fps_for_manual))
+            end_frame = max(start_frame, int(manual.end_seconds * fps_for_manual))
+            region = BlurRegion(
+                x=manual.x,
+                y=manual.y,
+                width=manual.width,
+                height=manual.height,
+                score=1.0,
+            )
+            for frame_id in range(start_frame, end_frame + 1):
+                per_frame[frame_id].append(region)
         raw_frames = len(per_frame)
         raw_regions = sum(len(v) for v in per_frame.values())
         _append_export_log(export, f"Loaded {raw_regions} blur regions across {raw_frames} frames.")
+        if manual_regions:
+            _append_export_log(export, f"Included {len(manual_regions)} manual blur segment(s).")
         per_frame = _densify_blur_regions(per_frame)
         dense_frames = len(per_frame)
         dense_regions = sum(len(v) for v in per_frame.values())
@@ -660,6 +677,19 @@ def _region_bounds(det: BlurRegion, frame_width: int, frame_height: int) -> tupl
     return (x0, y0, x1, y1)
 
 
+def _redaction_strength(short_edge: int) -> tuple[float, int]:
+    """Scale redaction aggressiveness with face size.
+
+    Small distant faces are already anonymised by modest blur/pixelation.
+    Large close-ups need much heavier treatment or identity still leaks
+    through facial structure.
+    """
+    normalized = max(0.0, min(1.0, (short_edge - 72) / 220.0))
+    severity = 1.0 + normalized * 2.35
+    extra_passes = int(round(normalized * 3.0))
+    return severity, extra_passes
+
+
 def _redact_patch(roi, style: str):
     """Returns a fully obfuscated copy of the ROI patch — works only on the
     extracted region so the kernel can never bleed dark pixels from outside."""
@@ -668,6 +698,7 @@ def _redact_patch(roi, style: str):
 
     h, w = roi.shape[:2]
     short_edge = max(1, min(h, w))
+    severity, extra_passes = _redaction_strength(short_edge)
 
     if style == ExportJob.Style.SOLID:
         avg = roi.reshape(-1, roi.shape[2]).mean(axis=0).astype(np.uint8)
@@ -676,8 +707,9 @@ def _redact_patch(roi, style: str):
         return out
 
     if style == ExportJob.Style.MOSAIC:
-        # Aggressive pixelation: ~10 blocks across the short edge.
-        cells = max(6, short_edge // 14)
+        # Large close-ups need much chunkier blocks than distant faces.
+        target_block = max(12, int(round(12 * severity)))
+        cells = max(3, short_edge // target_block)
         small = cv2.resize(roi, (cells, cells), interpolation=cv2.INTER_AREA)
         return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
 
@@ -692,12 +724,13 @@ def _redact_patch(roi, style: str):
 
     # Default: gaussian — very strong, with replicated-border padding so the
     # edges don't get pulled toward the dark frame outside the ROI.
-    pad = max(8, short_edge // 4)
+    pad = max(8, int(short_edge * (0.22 + 0.08 * severity)))
     padded = cv2.copyMakeBorder(roi, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
-    k = max(41, int(short_edge / 1.4) | 1)
+    k = max(41, int((short_edge / 1.55) * severity) | 1)
     k = min(k, 251)
     blurred = cv2.GaussianBlur(padded, (k, k), 0)
-    blurred = cv2.GaussianBlur(blurred, (k, k), 0)  # second pass for smear
+    for _ in range(1 + extra_passes):
+        blurred = cv2.GaussianBlur(blurred, (k, k), 0)
     return blurred[pad : pad + h, pad : pad + w]
 
 
@@ -709,20 +742,22 @@ def _redact_patch_gpu(roi_gpu, style: str, gaussian_filters: dict):
 
     rw, rh = roi_gpu.size()
     short_edge = max(1, min(rh, rw))
+    severity, extra_passes = _redaction_strength(short_edge)
 
     if style == ExportJob.Style.MOSAIC:
-        cells = max(6, short_edge // 14)
+        target_block = max(12, int(round(12 * severity)))
+        cells = max(3, short_edge // target_block)
         small = cv2.cuda.resize(roi_gpu, (cells, cells), interpolation=cv2.INTER_AREA)
         return cv2.cuda.resize(small, (rw, rh), interpolation=cv2.INTER_NEAREST)
 
     # gaussian
-    pad = max(8, short_edge // 4)
+    pad = max(8, int(short_edge * (0.22 + 0.08 * severity)))
     padded = cv2.cuda.copyMakeBorder(roi_gpu, pad, pad, pad, pad, cv2.BORDER_REPLICATE)
-    k = max(41, int(short_edge / 1.4) | 1)
+    k = max(41, int((short_edge / 1.55) * severity) | 1)
     k = min(k, 251)
     # cuda gaussian filter caps at 32; chain shorter passes to approximate.
     gpu_kernel = min(k, 31) | 1
-    passes = max(2, (k + gpu_kernel - 1) // gpu_kernel)
+    passes = max(2, (k + gpu_kernel - 1) // gpu_kernel) + extra_passes
     filter_key = (int(padded.type()), gpu_kernel)
     flt = gaussian_filters.get(filter_key)
     if flt is None:

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Login · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="auth-shell auth-shell-compact">
+    <section class="auth-panel auth-panel-compact">
+        <div class="auth-header">
+            <h1>Login</h1>
+            <p>Sign in to use Blurrinator.</p>
+        </div>
+        <div class="card card-padded">
+        <form method="post" class="form">
+            {% csrf_token %}
+            {% for field in form %}
+                <div class="field">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}<div class="errors">{{ field.errors|join:" " }}</div>{% endif %}
+                </div>
+            {% endfor %}
+            {% if form.non_field_errors %}
+                <div class="errors">{{ form.non_field_errors|join:" " }}</div>
+            {% endif %}
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Login</button>
+            </div>
+        </form>
+        </div>
+    </section>
+    </div>
+{% endblock %}
