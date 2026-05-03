@@ -1,7 +1,10 @@
 from django.conf import settings
 from django.urls import include, path
 
+from . import views
+
 urlpatterns = [
+    path("about/", views.about, name="about"),
     path("users/", include("users.urls")),
     path("allowlist/", include("allowlist.urls")),
     path("registry/", include("registry.urls")),

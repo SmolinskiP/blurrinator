@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Local video privacy redaction web application."
 readme = "README.md"
 requires-python = ">=3.12"
-license = "AGPL-3.0-only"
+license = "MIT"
 dependencies = [
     "django>=5.2",
     "django-q2>=1.7",

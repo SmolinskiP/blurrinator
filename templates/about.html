@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}About · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="page-header about-page-header">
+    <div>
+        <h1>About Blurrinator</h1>
+        <p>Local video privacy redaction for projects where source footage should stay on the workstation.</p>
+    </div>
+</div>
+
+<div class="about-layout">
+    <section class="about-origin">
+        <img src="{% static 'img/heinz.jpg' %}" alt="Heinz Doofenshmirtz" class="about-avatar">
+        <p>
+            The project name is a nod to Heinz Doofenshmirtz from Phineas and Ferb:
+            a small, very specific machine built to do one job.
+        </p>
+    </section>
+
+    <section class="about-section">
+        <h2>What It Does</h2>
+        <p>
+            Blurrinator is a local Django application for uploading video, detecting faces,
+            reviewing detections manually, and exporting redacted copies. Original files,
+            analysis artifacts, allowlist images, and exports stay on the machine running
+            the app.
+        </p>
+        <p>
+            The current pipeline focuses on face privacy: YuNet detects faces, SFace creates
+            embeddings for allowlist matching, and manual draft review lets an operator adjust
+            decisions before export.
+        </p>
+    </section>
+
+    <section class="about-section">
+        <h2>More From The Author</h2>
+        <div class="project-links">
+            <a href="https://ashes.pl" target="_blank" rel="noopener noreferrer" class="project-link">
+                <span>Ashes Fireshow</span>
+                <small>
+                    A fire arts collective creating precise, emotional shows built around light,
+                    movement, and story. Ashes also runs workshops and performances for children
+                    and young people facing difficult circumstances.
+                </small>
+            </a>
+            <a href="https://dailystoic.pl" target="_blank" rel="noopener noreferrer" class="project-link">
+                <span>Daily Stoic PL</span>
+                <small>
+                    A newsletter that sends Polish daily Stoic reflections inspired by Ryan Holiday's
+                    "The Daily Stoic".
+                </small>
+            </a>
+        </div>
+    </section>
+
+    <div class="about-footer-links">
+        <a href="https://github.com/SmolinskiP" target="_blank" rel="noopener noreferrer" class="btn btn-ghost">GitHub</a>
+        <a href="https://buymeacoffee.com/smolinskip" target="_blank" rel="noopener noreferrer" class="btn btn-primary">Buy Me a Coffee</a>
+    </div>
+
+    <section class="about-section">
+        <h2>Stack</h2>
+        <div class="about-stack">
+            <span class="chip">Django</span>
+            <span class="chip">Django-Q2</span>
+            <span class="chip">OpenCV CUDA</span>
+            <span class="chip">YuNet</span>
+            <span class="chip">SFace</span>
+            <span class="chip">FFmpeg</span>
+            <span class="chip">SQLite/Postgres-ready models</span>
+        </div>
+        <p>
+            YuNet and SFace are downloaded from OpenCV Zoo and registered with license,
+            provenance, file path, and SHA-256 hash. The application itself is MIT licensed.
+        </p>
+    </section>
+</div>
+{% endblock %}

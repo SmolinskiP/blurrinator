@@ -1,8 +1,22 @@
 # Blurrinator
 
-Local Django web app for privacy redaction in YouTube videos. Originals never leave the workstation. Licensed AGPL-3.0 because the planned detection stack uses Ultralytics YOLO.
+Local Django web app for privacy redaction in YouTube videos. Originals never leave the workstation. Licensed MIT.
 
 Current slice: project upload, SHA-256 + FFprobe metadata, model registry, allowlist scaffold, in-DB job queue, completed face analysis, manual draft review overrides, and final redaction export.
+
+## What It Uses
+
+Blurrinator currently uses OpenCV-based face analysis, not Ultralytics YOLO.
+
+- Django for the web app and admin-facing workflows.
+- Django-Q2 for the local database-backed job queue.
+- FFmpeg / FFprobe for video metadata, transcoding and browser-compatible exports.
+- OpenCV with CUDA for YuNet face detection, SFace face embeddings and optional GPU blur operations.
+- OpenCV Zoo YuNet weights registered as MIT licensed model artifacts.
+- OpenCV Zoo SFace weights registered as Apache-2.0 licensed model artifacts.
+- Pillow and NumPy for supporting image and array operations.
+
+The model registry stores license, provenance, file path and SHA-256 hash for each downloaded model file.
 
 ## Setup
 
@@ -18,7 +32,7 @@ venv/bin/python manage.py createsuperuser
 
 ## Run
 
-Two processes — web and worker. Open a terminal each:
+Two processes: web and worker. Open a terminal each:
 
 ```bash
 venv/bin/python manage.py runserver 0.0.0.0:8000
@@ -93,3 +107,14 @@ templates/          Hand-rolled UI templates
 static/css/app.css  Single CSS file, no build step
 storage/            Local artifact tree (gitignored)
 ```
+
+## Links
+
+- Author: <https://github.com/SmolinskiP>
+- Support: <https://buymeacoffee.com/smolinskip>
+- Ashes Fireshow: <https://ashes.pl> - a fire arts collective creating precise, emotional shows built around light, movement and story. Ashes also runs workshops and performances for children and young people facing difficult circumstances.
+- Daily Stoic PL: <https://dailystoic.pl> - a newsletter that sends Polish daily Stoic reflections inspired by Ryan Holiday's "The Daily Stoic".
+
+## License
+
+Blurrinator is MIT licensed. The current codebase does not include Ultralytics YOLO or other AGPL-only runtime dependencies; third-party model artifacts keep their own licenses in the model registry.

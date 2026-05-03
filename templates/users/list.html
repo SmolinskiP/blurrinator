@@ -46,11 +46,13 @@
                     <td style="text-align: right;">
                         {% if request.user.is_staff %}
                             <a href="{% url 'users:password_reset' user.pk %}" class="btn btn-sm">Reset password</a>
-                            <form method="post" action="{% url 'users:delete' user.pk %}" class="inline-form"
-                                  onsubmit="return confirm('Delete user {{ user.username|escapejs }}?');">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-danger">Delete</button>
-                            </form>
+                            {% if user.pk != request.user.pk %}
+                                <form method="post" action="{% url 'users:delete' user.pk %}" class="inline-form"
+                                      onsubmit="return confirm('Delete user {{ user.username|escapejs }}?');">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                </form>
+                            {% endif %}
                         {% endif %}
                     </td>
                 </tr>

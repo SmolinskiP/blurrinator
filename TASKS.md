@@ -56,8 +56,9 @@ Living checklist. Updated as work progresses. Source of truth for scope is [IMPL
 
 ## Phase 3 — Person + head fallback
 
-- [ ] YOLO11 detect person tracking
-- [ ] YOLO11-pose for head region estimation when no face is visible
+- [ ] Select permissive-license person detector or explicitly revisit Ultralytics licensing
+- [ ] Person tracking
+- [ ] Pose/head-region model for head estimation when no face is visible
 - [ ] Track association face ↔ person
 - [ ] Review flags for fallback-head regions
 
