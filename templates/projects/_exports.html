@@ -1,0 +1,50 @@
+{% load humanize %}
+{% if export_cards %}
+    {% for card in export_cards %}
+        {% with export=card.export %}
+            <details class="job-card" data-card-id="export-{{ export.pk }}" {% if export.status == "running" %}open{% endif %}>
+                <summary class="job-row job-row-summary">
+                    <div style="flex: 1;">
+                        <span class="status-pill {{ export.status }}">{{ export.get_status_display }}</span>
+                        <span class="meta" style="margin-left: 10px;">{{ export.get_style_display }} · {{ export.created_at|date:"M j H:i:s" }}</span>
+                        {% if export.size_bytes %}<span class="meta" style="margin-left: 10px;">{{ export.size_bytes|filesizeformat }}</span>{% endif %}
+                        {% if export.message %}<div class="meta" style="margin-top:6px;">{{ export.message }}</div>{% endif %}
+                    </div>
+                    <div class="job-progress-wrap">
+                        <div class="meta">{{ export.progress }}%</div>
+                        <div class="progress"><span style="width: {{ export.progress }}%;"></span></div>
+                    </div>
+                </summary>
+                <div class="job-card-body">
+                    {% if card.log_lines %}
+                        <div class="log-panel">
+                            <div class="log-title">Live export log</div>
+                            <pre class="job-log">{% for line in card.log_lines %}{{ line }}
+{% endfor %}</pre>
+                        </div>
+                    {% endif %}
+                    {% if card.preview_url %}
+                        <div class="analysis-preview">
+                            <div class="analysis-preview-media">
+                                <video controls preload="metadata" class="preview-video">
+                                    <source src="{{ card.preview_url }}">
+                                </video>
+                            </div>
+                            <div class="analysis-preview-side">
+                                <div class="job-stats">
+                                    <span class="chip">{{ export.get_style_display }}</span>
+                                    {% if export.size_bytes %}<span class="chip">{{ export.size_bytes|filesizeformat }}</span>{% endif %}
+                                </div>
+                                <a class="btn btn-sm" href="{% url 'projects:download_export' export.pk %}">Download</a>
+                            </div>
+                        </div>
+                    {% elif export.is_done %}
+                        <a class="btn btn-sm" href="{% url 'projects:download_export' export.pk %}">Download</a>
+                    {% endif %}
+                </div>
+            </details>
+        {% endwith %}
+    {% endfor %}
+{% else %}
+    <div class="meta" style="color: var(--text-mute);">No exports yet.</div>
+{% endif %}

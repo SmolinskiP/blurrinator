@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}{{ project.title }} · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{{ project.title }}</h1>
+        <p>Created {{ project.created_at|date:"M j, Y · H:i" }}{% if project.notes %} · {{ project.notes }}{% endif %}</p>
+    </div>
+    <div class="page-header-actions">
+        {% if project.source %}
+            <form method="post" action="{% url 'projects:analyze' project.slug %}" class="inline-form">
+                {% csrf_token %}
+                <button type="submit" class="btn">Run analysis</button>
+            </form>
+            {% if review_job %}
+                <a href="{% url 'projects:draft_review' project.slug %}" class="btn btn-ghost">Draft review</a>
+            {% endif %}
+            <form method="post" action="{% url 'projects:export_final' project.slug %}" class="inline-form">
+                {% csrf_token %}
+                <select name="style" class="select-sm" title="Redaction style">
+                    <option value="mosaic">Mosaic</option>
+                    <option value="gaussian">Gaussian blur</option>
+                    <option value="solid">Solid fill</option>
+                    <option value="eye_bar">Eye bar</option>
+                </select>
+                <button type="submit" class="btn btn-primary">Final export</button>
+            </form>
+        {% endif %}
+        <form method="post" action="{% url 'projects:delete' project.slug %}" class="inline-form"
+              onsubmit="return confirm('Delete project, original and all artifacts?');">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">Delete</button>
+        </form>
+    </div>
+</div>
+
+{% if queue_health_error %}
+    <div class="flash warning" style="margin-bottom: 22px;">{{ queue_health_error }}</div>
+{% endif %}
+
+{% if runtime_health_error %}
+    <div class="flash warning" style="margin-bottom: 22px;">{{ runtime_health_error }}</div>
+{% endif %}
+
+<div class="detail-grid">
+    <div>
+        <div class="card card-padded" style="margin-bottom: 22px;">
+            <div class="section-title"><h2>Analysis jobs</h2></div>
+            <div data-analysis-jobs>
+                {% include "projects/_analysis_jobs.html" with analysis_cards=analysis_cards project=project %}
+            </div>
+        </div>
+
+        <div class="card card-padded">
+            <div class="section-title"><h2>Exports</h2></div>
+            <div data-export-jobs>
+                {% include "projects/_exports.html" with export_cards=export_cards %}
+            </div>
+        </div>
+    </div>
+
+    <aside>
+        <div class="card card-padded">
+            <h3 class="card-title">Source video</h3>
+            <p class="card-sub">Stored locally · checksum verified on upload</p>
+            {% if project.source %}
+                <table class="kv-table">
+                    <tr><th>Filename</th><td>{{ project.source.original_filename }}</td></tr>
+                    <tr><th>Size</th><td>{{ project.source.size_bytes|filesizeformat }}</td></tr>
+                    <tr><th>SHA-256</th><td style="word-break: break-all;">{{ project.source.sha256 }}</td></tr>
+                    <tr><th>Container</th><td>{{ project.source.container|default:"—" }}</td></tr>
+                    <tr><th>Video</th><td>{{ project.source.video_codec|default:"—" }}</td></tr>
+                    <tr><th>Audio</th><td>{{ project.source.audio_codec|default:"—" }}</td></tr>
+                    <tr><th>Resolution</th><td>{{ project.source.resolution }}</td></tr>
+                    <tr><th>FPS</th><td>{{ project.source.fps|default:"—"|floatformat:3 }}</td></tr>
+                    <tr><th>Duration</th><td>{% if project.source.duration_seconds %}{{ project.source.duration_seconds|floatformat:2 }} s{% else %}—{% endif %}</td></tr>
+                    <tr><th>Bitrate</th><td>{% if project.source.bitrate %}{{ project.source.bitrate|intcomma }} bps{% else %}—{% endif %}</td></tr>
+                </table>
+            {% else %}
+                <p class="card-sub" style="color: var(--text-mute);">No source attached.</p>
+            {% endif %}
+        </div>
+    </aside>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+    const analysisRoot = document.querySelector("[data-analysis-jobs]");
+    const exportRoot = document.querySelector("[data-export-jobs]");
+    if (!analysisRoot || !exportRoot) {
+        return;
+    }
+
+    const statusUrl = "{% url 'projects:status' project.slug %}";
+    let timerId = null;
+    let polling = false;
+    let lastAnalysisHash = null;
+    let lastExportsHash = null;
+
+    const wirePreviewButtons = (root) => {
+        root.querySelectorAll("[data-seek-seconds]").forEach((button) => {
+            button.addEventListener("click", () => {
+                const panel = button.closest(".analysis-preview");
+                const video = panel ? panel.querySelector("[data-preview-video]") : null;
+                if (!video) {
+                    return;
+                }
+                const seconds = Number(button.getAttribute("data-seek-seconds") || "0");
+                video.currentTime = seconds;
+                video.play().catch(() => {});
+            });
+        });
+    };
+
+    const hasPlayingVideo = (el) => {
+        return Array.from(el.querySelectorAll("video")).some(
+            (v) => !v.paused && !v.ended
+        );
+    };
+
+    // Per-card swap: replace only cards whose HTML actually changed, and never
+    // touch a card whose video is playing or that the user manually opened
+    // (otherwise progress ticks on a sibling card would yank the preview).
+    const swapPerCard = (root, html) => {
+        const tmp = document.createElement("div");
+        tmp.innerHTML = html;
+        const newCards = Array.from(tmp.querySelectorAll("[data-card-id]"));
+
+        if (newCards.length === 0) {
+            // Empty state (e.g. "No exports yet.") — only replace if the root
+            // currently has cards or the placeholder text differs.
+            if (root.querySelector("[data-card-id]") || root.innerHTML.trim() !== tmp.innerHTML.trim()) {
+                root.innerHTML = html;
+            }
+            return;
+        }
+
+        const oldByCardId = new Map(
+            Array.from(root.querySelectorAll("[data-card-id]")).map(
+                (el) => [el.getAttribute("data-card-id"), el]
+            )
+        );
+        const newIds = new Set(newCards.map((c) => c.getAttribute("data-card-id")));
+
+        // Drop cards that disappeared.
+        for (const [id, el] of oldByCardId) {
+            if (!newIds.has(id)) el.remove();
+        }
+
+        // Clear any leftover empty-state placeholder.
+        root.querySelectorAll(":scope > .meta").forEach((el) => el.remove());
+
+        let cursor = null;
+        for (const newCard of newCards) {
+            const id = newCard.getAttribute("data-card-id");
+            const oldCard = oldByCardId.get(id);
+            if (!oldCard) {
+                if (cursor && cursor.nextSibling) {
+                    root.insertBefore(newCard, cursor.nextSibling);
+                } else {
+                    root.appendChild(newCard);
+                }
+                wirePreviewButtons(newCard);
+                cursor = newCard;
+                continue;
+            }
+            if (oldCard.outerHTML === newCard.outerHTML) {
+                cursor = oldCard;
+                continue;
+            }
+            if (hasPlayingVideo(oldCard)) {
+                cursor = oldCard;
+                continue;
+            }
+            const wasOpen = oldCard.open;
+            oldCard.replaceWith(newCard);
+            if (wasOpen && newCard.tagName === "DETAILS") newCard.open = true;
+            wirePreviewButtons(newCard);
+            cursor = newCard;
+        }
+    };
+
+    const swapIfChanged = (root, html, newHash, lastHash) => {
+        if (newHash === lastHash) return lastHash;
+        swapPerCard(root, html);
+        return newHash;
+    };
+
+    const schedule = (delayMs) => {
+        window.clearTimeout(timerId);
+        timerId = window.setTimeout(pollStatus, delayMs);
+    };
+
+    const pollStatus = async () => {
+        if (polling) {
+            return;
+        }
+        polling = true;
+        try {
+            const response = await fetch(statusUrl, {
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            });
+            if (!response.ok) {
+                schedule(4000);
+                return;
+            }
+            const payload = await response.json();
+            lastAnalysisHash = swapIfChanged(
+                analysisRoot, payload.analysis_html, payload.analysis_hash, lastAnalysisHash
+            );
+            lastExportsHash = swapIfChanged(
+                exportRoot, payload.exports_html, payload.exports_hash, lastExportsHash
+            );
+            schedule(payload.has_active_jobs ? 1200 : 5000);
+        } catch {
+            schedule(4000);
+        } finally {
+            polling = false;
+        }
+    };
+
+    wirePreviewButtons(analysisRoot);
+    schedule(1500);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,20 @@
+[project]
+name = "blurrinator"
+version = "0.1.0"
+description = "Local video privacy redaction web application."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "AGPL-3.0-only"
+dependencies = [
+    "django>=5.2",
+    "django-q2>=1.7",
+    "pillow>=11.0",
+    "numpy>=2.0",
+]
+
+[build-system]
+requires = ["setuptools>=80.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []

@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Draft review · {{ project.title }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Draft review · {{ project.title }}</h1>
+        <p>
+            Latest completed analysis: {{ review_job.created_at|date:"M j, Y · H:i" }}.
+            Manual overrides from this screen are used by final export.
+        </p>
+    </div>
+    <div class="page-header-actions">
+        <a href="{{ project.get_absolute_url }}" class="btn btn-ghost">Back to project</a>
+        <form method="post" action="{% url 'projects:export_final' project.slug %}" class="inline-form">
+            {% csrf_token %}
+            <select name="style" class="select-sm" title="Redaction style">
+                <option value="mosaic">Mosaic</option>
+                <option value="gaussian">Gaussian blur</option>
+                <option value="solid">Solid fill</option>
+                <option value="eye_bar">Eye bar</option>
+            </select>
+            <button type="submit" class="btn btn-primary">Final export</button>
+        </form>
+    </div>
+</div>
+
+<div class="review-grid">
+    <section class="card card-padded">
+        <div class="section-title">
+            <h2>Video review</h2>
+        </div>
+        <div class="review-summary">
+            <span class="chip">allowed {{ counts.allowed|default:0 }}</span>
+            <span class="chip">blur {{ counts.unknown|default:0 }}</span>
+            <span class="chip">uncertain {{ counts.uncertain|default:0 }}</span>
+            <span class="chip">conflict {{ counts.conflict|default:0 }}</span>
+            <span class="chip">manual overrides {{ override_count }}</span>
+        </div>
+        <div class="review-player">
+            <video controls preload="metadata" class="review-video" data-review-video>
+                <source src="{{ source_url }}">
+            </video>
+            <div class="review-overlay" data-review-overlay aria-hidden="true"></div>
+        </div>
+        <div class="review-editor-empty" data-empty-state>
+            Select a detection from the list to inspect and adjust the blur box.
+        </div>
+        <form method="post" class="review-editor" data-editor hidden>
+            {% csrf_token %}
+            <div class="review-editor-head">
+                <div>
+                    <h3 data-editor-title>Detection</h3>
+                    <div class="meta" data-editor-meta></div>
+                </div>
+                <div class="job-stats">
+                    <span class="chip" data-editor-auto></span>
+                    <span class="chip" data-editor-override></span>
+                </div>
+            </div>
+            <div class="review-form-grid">
+                <label>
+                    <span>Decision</span>
+                    <select name="decision" class="select-sm" data-field="decision">
+                        <option value="unknown">Unknown — blur</option>
+                        <option value="uncertain">Uncertain — blur + flag</option>
+                        <option value="conflict">Identity conflict — blur + flag</option>
+                        <option value="allowed">Allowed</option>
+                    </select>
+                </label>
+                <label>
+                    <span>X</span>
+                    <input type="number" min="0" name="x" data-field="x">
+                </label>
+                <label>
+                    <span>Y</span>
+                    <input type="number" min="0" name="y" data-field="y">
+                </label>
+                <label>
+                    <span>Width</span>
+                    <input type="number" min="1" name="width" data-field="width">
+                </label>
+                <label>
+                    <span>Height</span>
+                    <input type="number" min="1" name="height" data-field="height">
+                </label>
+                <label class="review-form-span">
+                    <span>Note</span>
+                    <input type="text" maxlength="240" name="note" data-field="note" placeholder="Optional note for this override">
+                </label>
+            </div>
+            <div class="page-header-actions">
+                <button type="submit" class="btn btn-primary">Save override</button>
+                <button type="submit" class="btn btn-ghost" data-reset-button formaction="">Reset to automatic</button>
+            </div>
+        </form>
+    </section>
+
+    <aside class="card card-padded review-list-card">
+        <div class="section-title">
+            <h2>Detections</h2>
+        </div>
+        <div class="review-filters">
+            <button type="button" class="btn btn-sm btn-ghost is-active" data-filter="all">All</button>
+            <button type="button" class="btn btn-sm btn-ghost" data-filter="flagged">Flagged</button>
+            <button type="button" class="btn btn-sm btn-ghost" data-filter="override">Overrides</button>
+        </div>
+        <div class="review-list">
+            {% for row in detections %}
+                <button
+                    type="button"
+                    class="review-detection-item"
+                    id="det-{{ row.id }}"
+                    data-detection-item
+                    data-id="{{ row.id }}"
+                    data-save-url="{% url 'projects:save_detection_override' project.slug row.id %}"
+                    data-reset-url="{% url 'projects:reset_detection_override' project.slug row.id %}"
+                    data-time="{{ row.timestamp_seconds }}"
+                    data-time-label="{{ row.timestamp_label }}"
+                    data-frame="{{ row.frame_index }}"
+                    data-score="{{ row.score|floatformat:2 }}"
+                    data-similarity="{% if row.similarity %}{{ row.similarity|floatformat:2 }}{% endif %}"
+                    data-person="{{ row.matched_person }}"
+                    data-auto-decision="{{ row.auto_decision }}"
+                    data-auto-label="{{ row.auto_decision_label }}"
+                    data-effective-decision="{{ row.effective_decision }}"
+                    data-effective-label="{{ row.effective_decision_label }}"
+                    data-x="{{ row.x }}"
+                    data-y="{{ row.y }}"
+                    data-width="{{ row.width }}"
+                    data-height="{{ row.height }}"
+                    data-note="{{ row.override_note }}"
+                    data-has-override="{% if row.has_override %}1{% else %}0{% endif %}"
+                >
+                    <div class="review-detection-head">
+                        <span class="detection-time">{{ row.timestamp_label }}</span>
+                        <span class="status-pill {% if row.effective_decision == 'allowed' %}done{% elif row.effective_decision == 'unknown' %}failed{% else %}queued{% endif %}">
+                            {{ row.effective_decision_label }}
+                        </span>
+                    </div>
+                    <div class="review-detection-meta">
+                        frame {{ row.frame_index }} · {{ row.width }}×{{ row.height }} at {{ row.x }},{{ row.y }}
+                    </div>
+                    <div class="review-detection-meta">
+                        score {{ row.score|floatformat:2 }}{% if row.similarity %} · sim {{ row.similarity|floatformat:2 }}{% endif %}{% if row.matched_person %} · {{ row.matched_person }}{% endif %}
+                    </div>
+                    {% if row.has_override %}
+                        <div class="review-detection-meta review-detection-override">Manual override active</div>
+                    {% endif %}
+                </button>
+            {% empty %}
+                <div class="meta">No detections available for this analysis run.</div>
+            {% endfor %}
+        </div>
+    </aside>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+    const items = Array.from(document.querySelectorAll("[data-detection-item]"));
+    const video = document.querySelector("[data-review-video]");
+    const overlay = document.querySelector("[data-review-overlay]");
+    const form = document.querySelector("[data-editor]");
+    const emptyState = document.querySelector("[data-empty-state]");
+    if (!items.length || !video || !overlay || !form || !emptyState) {
+        return;
+    }
+
+    const resetButton = form.querySelector("[data-reset-button]");
+    const fields = {
+        decision: form.querySelector("[data-field='decision']"),
+        x: form.querySelector("[data-field='x']"),
+        y: form.querySelector("[data-field='y']"),
+        width: form.querySelector("[data-field='width']"),
+        height: form.querySelector("[data-field='height']"),
+        note: form.querySelector("[data-field='note']"),
+    };
+    const title = form.querySelector("[data-editor-title]");
+    const meta = form.querySelector("[data-editor-meta]");
+    const autoChip = form.querySelector("[data-editor-auto]");
+    const overrideChip = form.querySelector("[data-editor-override]");
+    const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
+    let selectedItem = null;
+
+    const getBox = () => ({
+        x: Number(fields.x.value || "0"),
+        y: Number(fields.y.value || "0"),
+        width: Number(fields.width.value || "0"),
+        height: Number(fields.height.value || "0"),
+    });
+
+    const syncOverlay = () => {
+        const box = getBox();
+        const rect = video.getBoundingClientRect();
+        const intrinsicWidth = video.videoWidth || 1;
+        const intrinsicHeight = video.videoHeight || 1;
+        const scaleX = rect.width / intrinsicWidth;
+        const scaleY = rect.height / intrinsicHeight;
+        overlay.style.left = `${box.x * scaleX}px`;
+        overlay.style.top = `${box.y * scaleY}px`;
+        overlay.style.width = `${box.width * scaleX}px`;
+        overlay.style.height = `${box.height * scaleY}px`;
+    };
+
+    const setSelected = (item) => {
+        selectedItem?.classList.remove("is-selected");
+        selectedItem = item;
+        item.classList.add("is-selected");
+        emptyState.hidden = true;
+        form.hidden = false;
+        form.action = item.dataset.saveUrl;
+        resetButton.setAttribute("formaction", item.dataset.resetUrl);
+        title.textContent = `Detection at ${item.dataset.timeLabel}`;
+        meta.textContent = `frame ${item.dataset.frame} · score ${item.dataset.score}${item.dataset.similarity ? ` · sim ${item.dataset.similarity}` : ""}${item.dataset.person ? ` · ${item.dataset.person}` : ""}`;
+        autoChip.textContent = `Auto: ${item.dataset.autoLabel}`;
+        overrideChip.textContent = item.dataset.hasOverride === "1" ? "Manual override active" : "Automatic values";
+        fields.decision.value = item.dataset.effectiveDecision;
+        fields.x.value = item.dataset.x;
+        fields.y.value = item.dataset.y;
+        fields.width.value = item.dataset.width;
+        fields.height.value = item.dataset.height;
+        fields.note.value = item.dataset.note || "";
+        video.currentTime = Number(item.dataset.time || "0");
+        syncOverlay();
+    };
+
+    items.forEach((item) => {
+        item.addEventListener("click", () => setSelected(item));
+    });
+
+    [fields.x, fields.y, fields.width, fields.height].forEach((field) => {
+        field.addEventListener("input", syncOverlay);
+    });
+    video.addEventListener("loadedmetadata", syncOverlay);
+    window.addEventListener("resize", syncOverlay);
+
+    const applyFilter = (name) => {
+        filterButtons.forEach((button) => {
+            button.classList.toggle("is-active", button.dataset.filter === name);
+        });
+        items.forEach((item) => {
+            const flagged = item.dataset.effectiveDecision !== "allowed";
+            const overridden = item.dataset.hasOverride === "1";
+            const visible =
+                name === "all" ||
+                (name === "flagged" && flagged) ||
+                (name === "override" && overridden);
+            item.hidden = !visible;
+        });
+    };
+
+    filterButtons.forEach((button) => {
+        button.addEventListener("click", () => applyFilter(button.dataset.filter));
+    });
+
+    applyFilter("flagged");
+    const hashTarget = window.location.hash ? document.querySelector(window.location.hash) : null;
+    setSelected(hashTarget && hashTarget.matches("[data-detection-item]") ? hashTarget : items[0]);
+})();
+</script>
+{% endblock %}

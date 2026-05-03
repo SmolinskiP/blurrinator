@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv/bin/python --version)",
+      "Bash(venv/bin/pip list *)",
+      "Bash(venv/bin/pip install *)",
+      "Bash(venv/bin/pip uninstall *)",
+      "Bash(venv/bin/django-admin startproject *)",
+      "Bash(venv/bin/python manage.py startapp projects)",
+      "Bash(venv/bin/python manage.py startapp registry)",
+      "Bash(venv/bin/python manage.py startapp allowlist)",
+      "Bash(venv/bin/python manage.py makemigrations)",
+      "Bash(venv/bin/python manage.py migrate)",
+      "Bash(venv/bin/python manage.py check)",
+      "Bash(venv/bin/python manage.py runserver 127.0.0.1:8765)",
+      "Bash(curl -sS -o /tmp/list.html -w \"list:%{http_code}\\\\n\" http://127.0.0.1:8765/)",
+      "Bash(curl -sS -o /tmp/up.html -w \"upload:%{http_code}\\\\n\" http://127.0.0.1:8765/new/)",
+      "Bash(curl -sS -o /tmp/al.html -w \"allowlist:%{http_code}\\\\n\" http://127.0.0.1:8765/allowlist/)",
+      "Bash(curl -sS -o /tmp/reg.html -w \"registry:%{http_code}\\\\n\" http://127.0.0.1:8765/registry/)",
+      "Bash(ffmpeg -y -f lavfi -i testsrc=duration=2:size=320x240:rate=10 -pix_fmt yuv420p /tmp/sample.mp4)",
+      "Bash(curl -sS -c /tmp/c -b /tmp/c http://127.0.0.1:8765/new/ -o /tmp/form.html)",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"manage.py runserver\")",
+      "Bash(rm -rf storage db.sqlite3 /tmp/sample.mp4 /tmp/list.html /tmp/up.html /tmp/al.html /tmp/reg.html /tmp/det.html /tmp/result.html /tmp/form.html /tmp/c)",
+      "Bash(venv/bin/python manage.py fetch_models)",
+      "Bash(venv/bin/python -c ' *)",
+      "Bash(venv/bin/python manage.py shell -c ' *)",
+      "Bash(venv/bin/python manage.py makemigrations --dry-run --verbosity 2)",
+      "Bash(venv/bin/python manage.py showmigrations projects)",
+      "Bash(venv/bin/python manage.py makemigrations projects)",
+      "Bash(venv/bin/python -c \"from projects.services import _apply_redaction, _face_is_plausible; from projects.models import ExportJob; print\\('imports OK; styles:', list\\(ExportJob.Style.values\\)\\)\")",
+      "Bash(ffmpeg -hide_banner -encoders)",
+      "Bash(ffprobe -v error -show_streams -show_format storage/projects/testy/exports/final-6.mp4)",
+      "Bash(chmod +x /home/patryk/blurrinator/app.sh)",
+      "Bash(/home/patryk/blurrinator/app.sh status *)"
+    ]
+  }
+}

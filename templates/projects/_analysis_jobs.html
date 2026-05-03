@@ -1,0 +1,72 @@
+{% load humanize %}
+{% if analysis_cards %}
+    {% for card in analysis_cards %}
+        {% with job=card.job counts=card.counts %}
+            <details class="job-card" data-card-id="analysis-{{ job.pk }}" {% if job.status == "running" %}open{% endif %}>
+                <summary class="job-row job-row-summary">
+                    <div>
+                        <span class="status-pill {{ job.status }}">{{ job.get_status_display }}</span>
+                        <span class="meta" style="margin-left: 10px;">{{ job.created_at|date:"M j H:i:s" }}</span>
+                        {% if job.message %}<div class="meta" style="margin-top:6px;">{{ job.message }}</div>{% endif %}
+                    </div>
+                    <div class="job-progress-wrap">
+                        <div class="meta">{{ job.progress }}%</div>
+                        <div class="progress"><span style="width: {{ job.progress }}%;"></span></div>
+                    </div>
+                </summary>
+                <div class="job-card-body">
+                    <div class="job-stats">
+                        <span class="chip">allowed {{ counts.allowed|default:0 }}</span>
+                        <span class="chip">blur {{ counts.unknown|default:0 }}</span>
+                        <span class="chip">uncertain {{ counts.uncertain|default:0 }}</span>
+                        <span class="chip">conflict {{ counts.conflict|default:0 }}</span>
+                    </div>
+                    {% if card.log_lines %}
+                        <div class="log-panel">
+                            <div class="log-title">Live analysis log</div>
+                            <pre class="job-log">{% for line in card.log_lines %}{{ line }}
+{% endfor %}</pre>
+                        </div>
+                    {% endif %}
+                    {% if job.status == "done" and card.source_url %}
+                        <div class="analysis-preview">
+                            <div class="analysis-preview-media">
+                                <video controls preload="metadata" class="preview-video" data-preview-video>
+                                    <source src="{{ card.source_url }}">
+                                </video>
+                            </div>
+                            <div class="analysis-preview-side">
+                                <div class="meta" style="margin-bottom: 8px;">Jump to flagged detections from this analysis run.</div>
+                                {% if card.preview_rows %}
+                                    <div class="detection-list">
+                                        {% for row in card.preview_rows %}
+                                            <button
+                                                type="button"
+                                                class="detection-item"
+                                                data-seek-seconds="{{ row.timestamp_seconds }}"
+                                            >
+                                                <span class="detection-time">{{ row.timestamp_label }}</span>
+                                                <span class="detection-label">{{ row.decision }}</span>
+                                                <span class="detection-meta">
+                                                    score {{ row.score|floatformat:2 }}{% if row.similarity %} · sim {{ row.similarity|floatformat:2 }}{% endif %}{% if row.matched_person %} · {{ row.matched_person }}{% endif %}
+                                                </span>
+                                            </button>
+                                        {% endfor %}
+                                    </div>
+                                {% else %}
+                                    <div class="meta">No flagged detections. This run marked every detected face as allowed.</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% elif job.status == "done" %}
+                        <div class="meta">Source preview unavailable.</div>
+                    {% else %}
+                        <div class="meta">Preview appears after the analysis finishes.</div>
+                    {% endif %}
+                </div>
+            </details>
+        {% endwith %}
+    {% endfor %}
+{% else %}
+    <div class="meta" style="color: var(--text-mute);">No analysis runs yet.</div>
+{% endif %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}{{ person.display_name }} · Allowlist{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>{{ person.display_name }}</h1>
+        <p>{{ person.embeddings.count }} embedding(s) · enrolled {{ person.created_at|date:"M j, Y" }}{% if person.enrolled_by %} by {{ person.enrolled_by }}{% endif %}</p>
+    </div>
+    <div class="page-header-actions">
+        <a class="btn btn-ghost" href="{% url 'allowlist:index' %}">← Allowlist</a>
+        <form method="post" action="{% url 'allowlist:delete' person.pk %}" class="inline-form"
+              onsubmit="return confirm('Remove this person and all enrollment data?');">
+            {% csrf_token %}
+            <button class="btn btn-danger">Remove person</button>
+        </form>
+    </div>
+</div>
+
+<div class="detail-grid">
+    <div>
+        <div class="card card-padded" style="margin-bottom: 22px;">
+            <div class="section-title"><h2>Add face crops</h2></div>
+            <form method="post" action="{% url 'allowlist:upload' person.pk %}" enctype="multipart/form-data" class="form">
+                {% csrf_token %}
+                <div class="field">
+                    <label>Images</label>
+                    <input type="file" name="images" accept="image/*" multiple required>
+                    <div class="help">Single face per crop. Vary lighting, angle, expression. Aim for 30+ for stable matching.</div>
+                </div>
+                <div class="form-actions">
+                    <button class="btn btn-primary">Upload + extract embeddings</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="card card-padded">
+            <div class="section-title"><h2>Gallery</h2></div>
+            {% if person.images.all %}
+                <div class="enrollment-grid">
+                    {% for image in person.images.all %}
+                        <div class="enrollment-tile {{ image.status }}">
+                            <img src="{{ image.image.url }}" alt="">
+                            <div class="enrollment-meta">
+                                <span class="status-pill {% if image.status == 'accepted' %}done{% else %}failed{% endif %}">
+                                    {{ image.get_status_display }}
+                                </span>
+                                {% if image.quality_score %}
+                                    <span class="mono">score {{ image.quality_score|floatformat:2 }}</span>
+                                {% endif %}
+                                {% if image.rejected_reason %}
+                                    <div class="meta" style="margin-top:6px; color: var(--text-mute);">{{ image.rejected_reason }}</div>
+                                {% endif %}
+                            </div>
+                            <form method="post" action="{% url 'allowlist:image_delete' image.pk %}" class="enrollment-rm">
+                                {% csrf_token %}
+                                <button class="btn btn-sm btn-ghost">Remove</button>
+                            </form>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="meta" style="color: var(--text-mute);">No images yet.</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <aside>
+        <div class="card card-padded">
+            <h3 class="card-title">Consent basis</h3>
+            <p class="card-sub">Required by policy — kept with the person record.</p>
+            <p style="white-space: pre-wrap;">{{ person.consent_basis }}</p>
+        </div>
+    </aside>
+</div>
+{% endblock %}

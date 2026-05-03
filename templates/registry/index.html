@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Model registry · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Model registry</h1>
+        <p>Every model used by the pipeline is registered with its license, version and weight hash. Manage entries from the Django admin.</p>
+    </div>
+    <div class="page-header-actions">
+        <a class="btn btn-ghost" href="/admin/registry/modelentry/add/">+ Register model</a>
+    </div>
+</div>
+
+{% if groups %}
+    {% for family, entries in groups.items %}
+        <div class="registry-group">
+            <h2>{{ family }}</h2>
+            <div class="card">
+                <table class="list-table">
+                    <thead>
+                        <tr><th>Name</th><th>Version</th><th>License</th><th>Provenance</th><th>SHA-256</th><th>Registered</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in entries %}
+                            <tr>
+                                <td>{{ entry.name }}</td>
+                                <td class="mono">{{ entry.version }}</td>
+                                <td><span class="chip">{{ entry.license }}</span></td>
+                                <td>{{ entry.get_provenance_display }}</td>
+                                <td class="mono" style="max-width: 220px; overflow: hidden; text-overflow: ellipsis;">{{ entry.sha256|default:"—" }}</td>
+                                <td class="mono">{{ entry.registered_at|date:"Y-m-d" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% endfor %}
+{% else %}
+    <div class="empty">
+        <h2>Registry is empty</h2>
+        <p>Register YuNet, SFace, YOLO11 detect/seg/pose and the tracker before running analysis. Each entry must include license and weights hash.</p>
+        <a class="btn btn-primary" href="/admin/registry/modelentry/add/">+ Register model</a>
+    </div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}New project · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>New project</h1>
+        <p>Upload a single source video. We compute the SHA-256, probe metadata with FFprobe and stage it for analysis.</p>
+    </div>
+    <div class="page-header-actions">
+        <a class="btn btn-ghost" href="{% url 'projects:list' %}">← Back</a>
+    </div>
+</div>
+
+<div style="max-width: 640px;">
+    <div class="card card-padded">
+        <form method="post" enctype="multipart/form-data" class="form" data-upload-form>
+            {% csrf_token %}
+            <div class="errors" data-form-errors{% if not form.non_field_errors %} hidden{% endif %}>
+                {% if form.non_field_errors %}{{ form.non_field_errors }}{% endif %}
+            </div>
+            <div class="upload-feedback" data-upload-feedback hidden>
+                <div class="upload-feedback-head">
+                    <strong data-upload-status>Preparing upload…</strong>
+                    <span data-upload-percent>0%</span>
+                </div>
+                <div class="progress upload-progress" aria-hidden="true"><span data-upload-bar style="width: 0%;"></span></div>
+                <div class="upload-feedback-meta">
+                    <span data-upload-size>0 B / 0 B</span>
+                    <span data-upload-speed>0 MB/s</span>
+                    <span data-upload-eta>ETA --:--</span>
+                </div>
+            </div>
+            {% for field in form %}
+                <div class="field" data-field="{{ field.name }}">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+                    <div class="errors" data-field-errors{% if not field.errors %} hidden{% endif %}>
+                        {% if field.errors %}{{ field.errors|join:" " }}{% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+            <div class="form-actions">
+                <a href="{% url 'projects:list' %}" class="btn btn-ghost">Cancel</a>
+                <button type="submit" class="btn btn-primary" data-upload-submit>Upload</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+    const form = document.querySelector("[data-upload-form]");
+    if (!form || !window.XMLHttpRequest || !window.FormData) {
+        return;
+    }
+
+    const feedback = form.querySelector("[data-upload-feedback]");
+    const status = form.querySelector("[data-upload-status]");
+    const percent = form.querySelector("[data-upload-percent]");
+    const bar = form.querySelector("[data-upload-bar]");
+    const size = form.querySelector("[data-upload-size]");
+    const speed = form.querySelector("[data-upload-speed]");
+    const eta = form.querySelector("[data-upload-eta]");
+    const submit = form.querySelector("[data-upload-submit]");
+    const formErrors = form.querySelector("[data-form-errors]");
+    const fieldErrorNodes = new Map(
+        Array.from(form.querySelectorAll("[data-field]")).map((field) => [
+            field.dataset.field,
+            field.querySelector("[data-field-errors]"),
+        ]),
+    );
+
+    const formatBytes = (bytes) => {
+        if (!Number.isFinite(bytes) || bytes <= 0) {
+            return "0 B";
+        }
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        const power = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+        const value = bytes / (1024 ** power);
+        return `${value.toFixed(power === 0 ? 0 : 1)} ${units[power]}`;
+    };
+
+    const formatDuration = (seconds) => {
+        if (!Number.isFinite(seconds) || seconds < 0) {
+            return "--:--";
+        }
+        const rounded = Math.max(0, Math.round(seconds));
+        const mins = Math.floor(rounded / 60);
+        const secs = rounded % 60;
+        if (mins >= 60) {
+            const hours = Math.floor(mins / 60);
+            return `${hours}:${String(mins % 60).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+        }
+        return `${mins}:${String(secs).padStart(2, "0")}`;
+    };
+
+    const setText = (node, value) => {
+        if (node) {
+            node.textContent = value;
+        }
+    };
+
+    const showNode = (node, visible) => {
+        if (!node) {
+            return;
+        }
+        node.hidden = !visible;
+    };
+
+    const clearErrors = () => {
+        showNode(formErrors, false);
+        formErrors.textContent = "";
+        for (const node of fieldErrorNodes.values()) {
+            showNode(node, false);
+            node.textContent = "";
+        }
+    };
+
+    const showErrors = (payload) => {
+        const nonField = payload.non_field_errors || [];
+        if (nonField.length) {
+            formErrors.textContent = nonField.join(" ");
+            showNode(formErrors, true);
+        }
+        const errors = payload.errors || {};
+        for (const [name, items] of Object.entries(errors)) {
+            const node = fieldErrorNodes.get(name);
+            if (!node || !items.length) {
+                continue;
+            }
+            node.textContent = items.join(" ");
+            showNode(node, true);
+        }
+    };
+
+    form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        clearErrors();
+
+        const xhr = new XMLHttpRequest();
+        const startedAt = performance.now();
+
+        xhr.open("POST", form.action || window.location.href, true);
+        xhr.setRequestHeader("X-Requested-With", "XMLHttpRequest");
+        xhr.responseType = "json";
+
+        submit.disabled = true;
+        feedback.hidden = false;
+        setText(status, "Uploading source video…");
+        setText(percent, "0%");
+        setText(size, "0 B / 0 B");
+        setText(speed, "0 MB/s");
+        setText(eta, "ETA --:--");
+        bar.style.width = "0%";
+
+        xhr.upload.addEventListener("progress", (progressEvent) => {
+            if (!progressEvent.lengthComputable) {
+                setText(status, "Uploading source video…");
+                return;
+            }
+
+            const loaded = progressEvent.loaded;
+            const total = progressEvent.total;
+            const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);
+            const bytesPerSecond = loaded / elapsedSeconds;
+            const ratio = total > 0 ? loaded / total : 0;
+            const remainingSeconds = bytesPerSecond > 0 ? (total - loaded) / bytesPerSecond : NaN;
+            const progressPercent = Math.min(100, Math.max(0, ratio * 100));
+
+            setText(status, progressPercent >= 100 ? "Finalizing upload…" : "Uploading source video…");
+            setText(percent, `${progressPercent.toFixed(progressPercent >= 10 ? 0 : 1)}%`);
+            setText(size, `${formatBytes(loaded)} / ${formatBytes(total)}`);
+            setText(speed, `${formatBytes(bytesPerSecond)}/s`);
+            setText(eta, `ETA ${formatDuration(remainingSeconds)}`);
+            bar.style.width = `${progressPercent}%`;
+        });
+
+        xhr.addEventListener("load", () => {
+            submit.disabled = false;
+            if (xhr.status >= 200 && xhr.status < 300 && xhr.response && xhr.response.redirect_url) {
+                setText(status, "Upload complete. Redirecting…");
+                setText(percent, "100%");
+                setText(eta, "ETA 0:00");
+                bar.style.width = "100%";
+                window.location.assign(xhr.response.redirect_url);
+                return;
+            }
+
+            setText(status, "Upload failed.");
+            if (xhr.response) {
+                showErrors(xhr.response);
+                return;
+            }
+            formErrors.textContent = "Upload failed. Please retry.";
+            showNode(formErrors, true);
+        });
+
+        xhr.addEventListener("error", () => {
+            submit.disabled = false;
+            setText(status, "Upload failed.");
+            formErrors.textContent = "Network error during upload. Please retry.";
+            showNode(formErrors, true);
+        });
+
+        xhr.send(new FormData(form));
+    });
+})();
+</script>
+{% endblock %}

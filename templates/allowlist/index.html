@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Allowlist · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Allowlist</h1>
+        <p>People whose faces stay visible after redaction. Each entry needs a documented consent basis and at least one accepted face embedding.</p>
+    </div>
+    <div class="page-header-actions">
+        <a class="btn btn-primary" href="{% url 'allowlist:new' %}">+ Enroll person</a>
+    </div>
+</div>
+
+{% if people %}
+    <div class="card">
+        <table class="list-table">
+            <thead>
+                <tr><th>Name</th><th>Status</th><th>Embeddings</th><th>Images</th><th>Consent</th><th>Added</th></tr>
+            </thead>
+            <tbody>
+                {% for person in people %}
+                    <tr onclick="window.location='{% url 'allowlist:detail' person.pk %}'" style="cursor:pointer;">
+                        <td><strong>{{ person.display_name }}</strong></td>
+                        <td>
+                            {% if person.is_active and person.embeddings.count %}
+                                <span class="status-pill done">active</span>
+                            {% elif person.is_active %}
+                                <span class="status-pill queued">no embeddings</span>
+                            {% else %}
+                                <span class="status-pill failed">inactive</span>
+                            {% endif %}
+                        </td>
+                        <td class="mono">{{ person.embeddings.count }}</td>
+                        <td class="mono">{{ person.images.count }}</td>
+                        <td style="max-width: 32ch; color: var(--text-dim);">{{ person.consent_basis|truncatechars:80 }}</td>
+                        <td class="mono">{{ person.created_at|date:"Y-m-d" }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+{% else %}
+    <div class="empty">
+        <h2>No allowlisted people yet</h2>
+        <p>Without entries here, every detected face will be blurred — which is the safe default but not what you want for the youtuber on screen.</p>
+        <a class="btn btn-primary" href="{% url 'allowlist:new' %}">+ Enroll person</a>
+    </div>
+{% endif %}
+{% endblock %}

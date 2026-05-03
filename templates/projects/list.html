@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% load humanize %}
+
+{% block title %}Projects · Blurrinator{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div>
+        <h1>Projects</h1>
+        <p>Each project bundles a single source video with its analysis runs and exports.</p>
+    </div>
+    <div class="page-header-actions">
+        <a class="btn btn-primary" href="{% url 'projects:new' %}">+ New project</a>
+    </div>
+</div>
+
+{% if projects %}
+    <div class="grid grid-cards">
+        {% for project in projects %}
+            <a class="card project-card" href="{{ project.get_absolute_url }}">
+                <div class="project-card-head">
+                    <div>
+                        <h3>{{ project.title }}</h3>
+                        <div class="meta">{{ project.created_at|date:"M j, Y · H:i" }}</div>
+                    </div>
+                    <span class="status-pill {{ project.status_label|lower }}">{{ project.status_label }}</span>
+                </div>
+                <div class="specs">
+                    {% if project.source %}
+                        <span class="chip chip-mono">{{ project.source.resolution }}</span>
+                        {% if project.source.fps %}<span class="chip chip-mono">{{ project.source.fps|floatformat:2 }} fps</span>{% endif %}
+                        {% if project.source.duration_seconds %}
+                            <span class="chip">{{ project.source.duration_seconds|floatformat:1 }} s</span>
+                        {% endif %}
+                        <span class="chip">{{ project.source.size_bytes|filesizeformat }}</span>
+                        {% if project.source.video_codec %}<span class="chip chip-mono">{{ project.source.video_codec }}</span>{% endif %}
+                    {% else %}
+                        <span class="chip">No source uploaded</span>
+                    {% endif %}
+                </div>
+            </a>
+        {% endfor %}
+    </div>
+{% else %}
+    <div class="empty">
+        <h2>No projects yet</h2>
+        <p>Upload your first video to start a redaction project. Originals stay on this machine.</p>
+        <a class="btn btn-primary" href="{% url 'projects:new' %}">+ New project</a>
+    </div>
+{% endif %}
+{% endblock %}
