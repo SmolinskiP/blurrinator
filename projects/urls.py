@@ -13,6 +13,11 @@ urlpatterns = [
     path("p/<slug:slug>/analyze/", views.queue_analysis, name="analyze"),
     path("p/<slug:slug>/draft/", views.draft_review, name="draft_review"),
     path(
+        "p/<slug:slug>/draft/detections/<int:detection_id>/thumb.jpg",
+        views.detection_thumbnail,
+        name="detection_thumbnail",
+    ),
+    path(
         "p/<slug:slug>/draft/detections/<int:detection_id>/save/",
         views.save_detection_override,
         name="save_detection_override",

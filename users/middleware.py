@@ -17,6 +17,7 @@ class RequireLoginMiddleware:
     def _requires_login(self, request) -> bool:
         path = request.path
         public_prefixes = (
+            reverse("about"),
             reverse("users:login"),
             reverse("users:setup") if not get_user_model().objects.exists() else "",
             self._url_path(settings.STATIC_URL),

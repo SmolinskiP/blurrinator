@@ -4,6 +4,7 @@ import hashlib
 import mimetypes
 from pathlib import Path
 
+from django.conf import settings
 from django.contrib import messages
 from django.db import connection, models
 from django.http import FileResponse, Http404, HttpResponse, StreamingHttpResponse
@@ -87,6 +88,54 @@ def _log_lines(text: str, limit: int = 80) -> list[str]:
     return lines[-limit:]
 
 
+def _looks_like_satellite_false(row: dict, peers: list[dict]) -> bool:
+    if row.get("landmark_implausible"):
+        return True
+    if row["effective_decision"] == FaceDetection.Decision.ALLOWED:
+        return False
+    if row["likely_match"]:
+        return False
+    if row["similarity"] is not None and row["similarity"] >= settings.FACE_MATCH_CANDIDATE_THRESHOLD:
+        return False
+
+    row_area = max(1, row["width"] * row["height"])
+    row_cx = row["x"] + row["width"] / 2.0
+    row_cy = row["y"] + row["height"] / 2.0
+    for peer in peers:
+        if peer["id"] == row["id"] or peer["effective_decision"] != FaceDetection.Decision.ALLOWED:
+            continue
+        peer_area = max(1, peer["width"] * peer["height"])
+        if peer_area < row_area * 2.4:
+            continue
+        peer_cx = peer["x"] + peer["width"] / 2.0
+        peer_bottom = peer["y"] + peer["height"]
+        horizontal_gap = abs(row_cx - peer_cx)
+        if horizontal_gap > peer["width"] * 0.65:
+            continue
+        if row["y"] < peer["y"] + peer["height"] * 0.45:
+            continue
+        if row_cy > peer_bottom + peer["height"] * 0.8:
+            continue
+        if row["score"] > 0.9 and row_area > peer_area * 0.45:
+            continue
+        return True
+    return False
+
+
+def _mark_likely_false_rows(rows: list[dict]) -> int:
+    by_frame: dict[int, list[dict]] = {}
+    for row in rows:
+        by_frame.setdefault(row["frame_index"], []).append(row)
+
+    count = 0
+    for peers in by_frame.values():
+        for row in peers:
+            row["likely_false"] = _looks_like_satellite_false(row, peers)
+            if row["likely_false"]:
+                count += 1
+    return count
+
+
 def _file_chunker(handle, *, offset: int = 0, length: int | None = None, chunk_size: int = 8192):
     try:
         handle.seek(offset)
@@ -103,6 +152,72 @@ def _file_chunker(handle, *, offset: int = 0, length: int | None = None, chunk_s
             yield data
     finally:
         handle.close()
+
+
+def _thumbnail_response(path: Path):
+    response = FileResponse(path.open("rb"), as_attachment=False, filename=path.name, content_type="image/jpeg")
+    response["Cache-Control"] = "private, max-age=86400"
+    response["Content-Length"] = str(path.stat().st_size)
+    return response
+
+
+def _detection_thumbnail_cache_path(project: Project, detection: FaceDetection, effective) -> Path:
+    cache_key = hashlib.sha1(
+        (
+            f"{detection.pk}:{detection.frame_index}:{effective.x}:{effective.y}:"
+            f"{effective.width}:{effective.height}:{effective.override_id or 0}"
+        ).encode("utf-8"),
+        usedforsecurity=False,
+    ).hexdigest()[:16]
+    return project.project_dir / "thumbs" / f"detection-{detection.pk}-{cache_key}.jpg"
+
+
+def _render_detection_thumbnail(source_path: Path, frame_index: int, x: int, y: int, width: int, height: int) -> bytes:
+    import cv2
+
+    cap = cv2.VideoCapture(str(source_path))
+    if not cap.isOpened():
+        raise Http404("Source not ready.")
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, frame_index))
+        grabbed, frame = cap.read()
+    finally:
+        cap.release()
+    if not grabbed or frame is None:
+        raise Http404("Frame could not be decoded.")
+
+    frame_h, frame_w = frame.shape[:2]
+    pad_x = max(18, int(width * 0.45))
+    pad_y = max(18, int(height * 0.45))
+    x0 = max(0, x - pad_x)
+    y0 = max(0, y - pad_y)
+    x1 = min(frame_w, x + width + pad_x)
+    y1 = min(frame_h, y + height + pad_y)
+    crop = frame[y0:y1, x0:x1].copy()
+    if crop.size == 0:
+        raise Http404("Thumbnail crop is empty.")
+
+    box_x0 = max(0, x - x0)
+    box_y0 = max(0, y - y0)
+    box_x1 = min(crop.shape[1] - 1, box_x0 + width)
+    box_y1 = min(crop.shape[0] - 1, box_y0 + height)
+    cv2.rectangle(crop, (box_x0, box_y0), (box_x1, box_y1), (255, 208, 92), 2)
+
+    target_w = 112
+    target_h = 88
+    scale = min(target_w / max(1, crop.shape[1]), target_h / max(1, crop.shape[0]), 1.0)
+    if scale < 1.0:
+        resized = cv2.resize(
+            crop,
+            (max(1, int(round(crop.shape[1] * scale))), max(1, int(round(crop.shape[0] * scale)))),
+            interpolation=cv2.INTER_AREA,
+        )
+    else:
+        resized = crop
+    ok, encoded = cv2.imencode(".jpg", resized, [int(cv2.IMWRITE_JPEG_QUALITY), 72])
+    if not ok:
+        raise Http404("Thumbnail encoding failed.")
+    return encoded.tobytes()
 
 
 def _video_response(request, path: Path):
@@ -362,11 +477,23 @@ def draft_review(request, slug: str):
     detections = []
     counts = {"allowed": 0, "unknown": 0, "uncertain": 0, "conflict": 0}
     override_count = 0
+    likely_match_count = 0
     for detection in detections_qs:
         effective = effective_detection_row(detection)
         counts[effective.decision] = counts.get(effective.decision, 0) + 1
         if effective.override_id:
             override_count += 1
+        likely_match = (
+            effective.decision != FaceDetection.Decision.ALLOWED
+            and detection.similarity is not None
+            and (
+                detection.matched_person_id is not None
+                or detection.decision == FaceDetection.Decision.CONFLICT
+                or detection.similarity >= settings.FACE_MATCH_THRESHOLD
+            )
+        )
+        if likely_match:
+            likely_match_count += 1
         detections.append(
             {
                 "id": detection.pk,
@@ -380,6 +507,9 @@ def draft_review(request, slug: str):
                 "auto_decision_label": detection.get_decision_display(),
                 "effective_decision": effective.decision,
                 "effective_decision_label": FaceDetection.Decision(effective.decision).label,
+                "likely_match": likely_match,
+                "likely_false": False,
+                "landmark_implausible": detection.landmark_implausible,
                 "x": effective.x,
                 "y": effective.y,
                 "width": effective.width,
@@ -388,6 +518,7 @@ def draft_review(request, slug: str):
                 "override_note": detection.override.note if getattr(detection, "override", None) else "",
             }
         )
+    likely_false_count = _mark_likely_false_rows(detections)
     manual_regions = [
         {
             "id": region.pk,
@@ -413,10 +544,41 @@ def draft_review(request, slug: str):
             "detections": detections,
             "counts": counts,
             "override_count": override_count,
+            "likely_match_count": likely_match_count,
+            "likely_false_count": likely_false_count,
             "manual_regions": manual_regions,
             "source_url": reverse("projects:source_video", args=[project.slug]),
         },
     )
+
+
+def detection_thumbnail(request, slug: str, detection_id: int):
+    project = get_object_or_404(Project.objects.select_related("source"), slug=slug)
+    source = getattr(project, "source", None)
+    if not source:
+        raise Http404("Source not ready.")
+
+    detection = get_object_or_404(
+        FaceDetection.objects.select_related("job__project", "override"),
+        pk=detection_id,
+        job__project=project,
+    )
+    effective = effective_detection_row(detection)
+    cache_path = _detection_thumbnail_cache_path(project, detection, effective)
+    if cache_path.exists():
+        return _thumbnail_response(cache_path)
+
+    payload = _render_detection_thumbnail(
+        Path(source.absolute_path),
+        detection.frame_index,
+        effective.x,
+        effective.y,
+        effective.width,
+        effective.height,
+    )
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_bytes(payload)
+    return _thumbnail_response(cache_path)
 
 
 @require_POST

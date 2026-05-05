@@ -17,7 +17,7 @@
     <div class="card">
         <table class="list-table">
             <thead>
-                <tr><th>Name</th><th>Status</th><th>Embeddings</th><th>Images</th><th>Consent</th><th>Added</th></tr>
+                <tr><th>Name</th><th>Status</th><th>Embeddings</th><th>Images</th><th>Consent</th><th>Added</th><th></th></tr>
             </thead>
             <tbody>
                 {% for person in people %}
@@ -36,6 +36,17 @@
                         <td class="mono">{{ person.images.count }}</td>
                         <td style="max-width: 32ch; color: var(--text-dim);">{{ person.consent_basis|truncatechars:80 }}</td>
                         <td class="mono">{{ person.created_at|date:"Y-m-d" }}</td>
+                        <td style="text-align: right;" onclick="event.stopPropagation();">
+                            <form method="post" action="{% url 'allowlist:toggle_active' person.pk %}" class="inline-form">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="{% url 'allowlist:index' %}">
+                                {% if person.is_active %}
+                                    <button class="btn btn-sm btn-ghost" type="submit">Deactivate</button>
+                                {% else %}
+                                    <button class="btn btn-sm btn-primary" type="submit">Activate</button>
+                                {% endif %}
+                            </form>
+                        </td>
                     </tr>
                 {% endfor %}
             </tbody>

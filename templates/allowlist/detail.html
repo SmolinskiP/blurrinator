@@ -6,10 +6,22 @@
 <div class="page-header">
     <div>
         <h1>{{ person.display_name }}</h1>
-        <p>{{ person.embeddings.count }} embedding(s) · enrolled {{ person.created_at|date:"M j, Y" }}{% if person.enrolled_by %} by {{ person.enrolled_by }}{% endif %}</p>
+        <p>
+            {{ person.embeddings.count }} embedding(s) · enrolled {{ person.created_at|date:"M j, Y" }}{% if person.enrolled_by %} by {{ person.enrolled_by }}{% endif %}
+            · {% if person.is_active %}active{% else %}inactive{% endif %}
+        </p>
     </div>
     <div class="page-header-actions">
         <a class="btn btn-ghost" href="{% url 'allowlist:index' %}">← Allowlist</a>
+        <form method="post" action="{% url 'allowlist:toggle_active' person.pk %}" class="inline-form">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{% url 'allowlist:detail' person.pk %}">
+            {% if person.is_active %}
+                <button class="btn btn-ghost" type="submit">Deactivate</button>
+            {% else %}
+                <button class="btn btn-primary" type="submit">Activate</button>
+            {% endif %}
+        </form>
         <form method="post" action="{% url 'allowlist:delete' person.pk %}" class="inline-form"
               onsubmit="return confirm('Remove this person and all enrollment data?');">
             {% csrf_token %}

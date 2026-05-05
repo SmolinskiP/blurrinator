@@ -912,14 +912,104 @@ footer code { font-family: var(--font-mono); color: var(--text-dim); }
     display: flex;
     justify-content: center;
     gap: 10px;
-    margin-top: -12px;
+    margin-top: 14px;
     margin-right: auto;
     margin-left: auto;
+}
+
+.support-callout {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    justify-self: center;
+    margin-top: -8px;
+    padding: 12px 14px 12px 18px;
+    border: 1px solid rgba(255, 221, 0, 0.28);
+    border-radius: var(--radius-md);
+    background: linear-gradient(180deg, rgba(255, 221, 0, 0.12), rgba(255, 181, 71, 0.06));
+    box-shadow: 0 12px 26px -18px rgba(255, 221, 0, 0.55);
+}
+
+.support-callout > span {
+    color: var(--text);
+    font-weight: 600;
+}
+
+.contact-links {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+.social-link {
+    --social-color: var(--line-strong);
+    --social-bg: rgba(255, 255, 255, 0.02);
+    width: 42px;
+    height: 42px;
+    display: inline-grid;
+    place-items: center;
+    color: var(--text-dim);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--social-bg);
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.05s ease;
+}
+
+.social-link-labeled {
+    width: auto;
+    min-width: 42px;
+    grid-auto-flow: column;
+    gap: 8px;
+    padding: 0 14px;
+}
+
+.social-link svg {
+    width: 19px;
+    height: 19px;
+    fill: currentColor;
+}
+
+.social-link span {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.social-link:hover {
+    color: #fff;
+    border-color: var(--social-color);
+    background: color-mix(in srgb, var(--social-color) 22%, transparent);
+}
+
+.social-link:active {
+    transform: translateY(1px);
+}
+
+.social-github { --social-color: #f0f3f6; }
+.social-linkedin { --social-color: #0a66c2; }
+.social-coffee { --social-color: #ffdd00; }
+.social-facebook { --social-color: #1877f2; }
+.social-whatsapp { --social-color: #25d366; }
+.social-mail { --social-color: #a855f7; }
+
+.social-coffee:hover {
+    color: #17130a;
+}
+
+.social-github:hover {
+    color: #0b0d10;
 }
 
 @media (max-width: 720px) {
     .project-links {
         grid-template-columns: 1fr;
+    }
+
+    .support-callout {
+        flex-direction: column;
+        width: 100%;
     }
 
     .about-footer-links {
@@ -1143,7 +1233,7 @@ footer code { font-family: var(--font-mono); color: var(--text-dim); }
     background: var(--bg-1);
     border: 1px solid var(--line);
     border-radius: 12px;
-    padding: 13px 14px;
+    padding: 10px 12px;
     cursor: pointer;
     transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
     position: relative;
@@ -1162,7 +1252,7 @@ footer code { font-family: var(--font-mono); color: var(--text-dim); }
 
 .review-detection-select {
     width: 100%;
-    padding: 0 0 0 32px;
+    padding: 0 0 0 28px;
     border: 0;
     background: transparent;
     color: inherit;
@@ -1170,10 +1260,53 @@ footer code { font-family: var(--font-mono); color: var(--text-dim); }
     cursor: pointer;
 }
 
+.review-detection-row {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+}
+
+.review-detection-thumb {
+    width: 72px;
+    height: 56px;
+    border-radius: 8px;
+    overflow: hidden;
+    background:
+        linear-gradient(135deg, rgba(92, 208, 255, 0.12), rgba(255, 208, 92, 0.1)),
+        rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.review-detection-thumb-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.review-detection-copy {
+    min-width: 0;
+}
+
+.review-detection-copy .review-detection-head {
+    margin-bottom: 4px;
+}
+
+.review-detection-copy .review-detection-meta + .review-detection-meta {
+    margin-top: 2px;
+}
+
+.review-detection-copy .status-pill {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
 .review-selection {
     position: absolute;
-    top: 13px;
-    left: 14px;
+    top: 10px;
+    left: 12px;
     width: 20px;
     height: 20px;
     display: grid;
@@ -1261,5 +1394,15 @@ footer code { font-family: var(--font-mono); color: var(--text-dim); }
 @media (max-width: 720px) {
     .review-form-grid {
         grid-template-columns: 1fr;
+    }
+
+    .review-detection-row {
+        grid-template-columns: 64px minmax(0, 1fr);
+        gap: 8px;
+    }
+
+    .review-detection-thumb {
+        width: 64px;
+        height: 50px;
     }
 }

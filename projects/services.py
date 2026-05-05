@@ -349,6 +349,7 @@ def run_analysis_job(job_id: int) -> None:
                 ]
                 total_faces += len(faces)
                 for face in faces:
+                    landmark_implausible = not _face_landmarks_are_plausible(face)
                     decision, matched_id, similarity = _decide_identity(
                         embedder, frame, face, vectors, owners
                     )
@@ -360,6 +361,7 @@ def run_analysis_job(job_id: int) -> None:
                         score=face.score,
                         matched_person_id=matched_id,
                         similarity=similarity,
+                        landmark_implausible=landmark_implausible,
                         decision=decision,
                     ))
 
@@ -384,6 +386,10 @@ def run_analysis_job(job_id: int) -> None:
 
         finally:
             cap.release()
+
+        smoothed = _smooth_allowed_detections(job)
+        if smoothed:
+            _append_analysis_log(job, f"Temporal identity smoothing allowed {smoothed} near-threshold face instance(s).")
 
         counts = {row["decision"]: row["n"] for row in
                   job.detections.values("decision").annotate(n=models.Count("id"))}
@@ -421,6 +427,54 @@ def _face_is_plausible(face) -> bool:
     return True
 
 
+def _face_landmarks_are_plausible(face) -> bool:
+    landmarks = getattr(face, "landmarks", None)
+    if landmarks is None or len(landmarks) != 5:
+        return True
+
+    pts = landmarks.astype(float)
+    xs = pts[:, 0]
+    ys = pts[:, 1]
+    x0 = float(face.x)
+    y0 = float(face.y)
+    x1 = x0 + float(face.w)
+    y1 = y0 + float(face.h)
+
+    pad_x = face.w * settings.FACE_LANDMARK_BOX_PADDING
+    pad_y = face.h * settings.FACE_LANDMARK_BOX_PADDING
+    if (
+        xs.min() < x0 - pad_x
+        or xs.max() > x1 + pad_x
+        or ys.min() < y0 - pad_y
+        or ys.max() > y1 + pad_y
+    ):
+        return False
+
+    right_eye, left_eye, nose, right_mouth, left_mouth = pts
+    eye_avg_y = float((right_eye[1] + left_eye[1]) / 2.0)
+    mouth_avg_y = float((right_mouth[1] + left_mouth[1]) / 2.0)
+    eye_min_x = float(min(right_eye[0], left_eye[0]))
+    eye_max_x = float(max(right_eye[0], left_eye[0]))
+    mouth_min_x = float(min(right_mouth[0], left_mouth[0]))
+    mouth_max_x = float(max(right_mouth[0], left_mouth[0]))
+
+    if nose[1] <= eye_avg_y or mouth_avg_y <= nose[1]:
+        return False
+    if mouth_avg_y - eye_avg_y < face.h * settings.FACE_LANDMARK_MIN_VERTICAL_SPAN:
+        return False
+    if eye_max_x - eye_min_x < face.w * settings.FACE_LANDMARK_MIN_EYE_SPAN:
+        return False
+    if mouth_max_x - mouth_min_x < face.w * settings.FACE_LANDMARK_MIN_MOUTH_SPAN:
+        return False
+    if not (eye_min_x <= nose[0] <= eye_max_x):
+        return False
+    if nose[0] < mouth_min_x - face.w * settings.FACE_LANDMARK_NOSE_MOUTH_TOLERANCE:
+        return False
+    if nose[0] > mouth_max_x + face.w * settings.FACE_LANDMARK_NOSE_MOUTH_TOLERANCE:
+        return False
+    return True
+
+
 def _decide_identity(embedder, frame, face, vectors, owners):
     """Returns (decision, matched_person_id_or_None, similarity_or_None)."""
 
@@ -437,9 +491,6 @@ def _decide_identity(embedder, frame, face, vectors, owners):
     threshold = settings.FACE_MATCH_THRESHOLD
     margin = settings.FACE_CONFLICT_MARGIN
 
-    if best_sim < threshold:
-        return (FaceDetection.Decision.UNKNOWN, None, best_sim)
-
     best_owner = owners[best]
     # Find best score per other person.
     per_person_best: dict[int, float] = {}
@@ -450,10 +501,146 @@ def _decide_identity(embedder, frame, face, vectors, owners):
         (sim for pid, sim in per_person_best.items() if pid != best_owner),
         default=-1.0,
     )
+    if best_sim < threshold:
+        candidate_threshold = settings.FACE_MATCH_CANDIDATE_THRESHOLD
+        if best_sim >= candidate_threshold and runner_up < best_sim - margin:
+            return (FaceDetection.Decision.UNKNOWN, best_owner, best_sim)
+        return (FaceDetection.Decision.UNKNOWN, None, best_sim)
+
     if runner_up >= best_sim - margin and runner_up >= threshold:
-        return (FaceDetection.Decision.CONFLICT, None, best_sim)
+        return (FaceDetection.Decision.CONFLICT, best_owner, best_sim)
 
     return (FaceDetection.Decision.ALLOWED, best_owner, best_sim)
+
+
+def _smooth_allowed_detections(job: AnalysisJob) -> int:
+    detections = list(
+        job.detections
+        .select_related("matched_person")
+        .order_by("frame_index", "id")
+    )
+    if len(detections) < 2:
+        return 0
+
+    tracks = _build_face_detection_tracks(detections)
+    changed: list[FaceDetection] = []
+    for track in tracks:
+        winner = _allowed_track_winner(track)
+        if winner is None:
+            continue
+        for detection in track:
+            if (
+                detection.decision == FaceDetection.Decision.UNKNOWN
+                and detection.matched_person_id == winner
+                and detection.similarity is not None
+                and detection.similarity >= settings.FACE_MATCH_CANDIDATE_THRESHOLD
+            ):
+                detection.decision = FaceDetection.Decision.ALLOWED
+                changed.append(detection)
+
+    if not changed:
+        return 0
+    FaceDetection.objects.bulk_update(changed, ["decision"])
+    return len(changed)
+
+
+def _build_face_detection_tracks(detections: list[FaceDetection]) -> list[list[FaceDetection]]:
+    tracks: list[list[FaceDetection]] = []
+    max_gap = max(1, int(settings.FACE_TRACK_MAX_GAP))
+
+    for detection in detections:
+        best_track: list[FaceDetection] | None = None
+        best_score = -999.0
+        for track in tracks:
+            previous = track[-1]
+            frame_gap = detection.frame_index - previous.frame_index
+            if frame_gap <= 0 or frame_gap > max_gap:
+                continue
+            score = _face_detection_track_score(previous, detection)
+            if score is None or score <= best_score:
+                continue
+            best_score = score
+            best_track = track
+        if best_track is None:
+            tracks.append([detection])
+        else:
+            best_track.append(detection)
+    return tracks
+
+
+def _allowed_track_winner(track: list[FaceDetection]) -> int | None:
+    if len(track) < 2:
+        return None
+
+    allowed_votes: dict[int, int] = {}
+    candidate_votes: dict[int, int] = {}
+    for detection in track:
+        person_id = detection.matched_person_id
+        if not person_id:
+            continue
+        if detection.similarity is None or detection.similarity < settings.FACE_MATCH_CANDIDATE_THRESHOLD:
+            continue
+        candidate_votes[person_id] = candidate_votes.get(person_id, 0) + 1
+        if detection.decision == FaceDetection.Decision.ALLOWED:
+            allowed_votes[person_id] = allowed_votes.get(person_id, 0) + 1
+
+    if not allowed_votes:
+        return None
+
+    winner, allowed_count = max(allowed_votes.items(), key=lambda item: item[1])
+    candidate_count = candidate_votes.get(winner, 0)
+    track_len = len(track)
+    if allowed_count < settings.FACE_TRACK_MIN_ALLOWED_VOTES:
+        return None
+    if allowed_count / track_len < settings.FACE_TRACK_MIN_ALLOWED_RATIO:
+        return None
+    if candidate_count / track_len < settings.FACE_TRACK_MIN_CANDIDATE_RATIO:
+        return None
+
+    runner_up = max((count for pid, count in allowed_votes.items() if pid != winner), default=0)
+    if runner_up and runner_up >= allowed_count:
+        return None
+    return winner
+
+
+def _face_detection_track_score(left: FaceDetection, right: FaceDetection) -> float | None:
+    iou = _face_detection_iou(left, right)
+    center_distance = _face_detection_center_distance(left, right)
+    max_extent = max(left.width, left.height, right.width, right.height, 1)
+    if iou <= 0 and center_distance > max_extent * 1.25:
+        return None
+    return iou - (center_distance / max_extent) * 0.1
+
+
+def _face_detection_iou(left: FaceDetection, right: FaceDetection) -> float:
+    left_x1 = left.x + left.width
+    left_y1 = left.y + left.height
+    right_x1 = right.x + right.width
+    right_y1 = right.y + right.height
+
+    inter_x0 = max(left.x, right.x)
+    inter_y0 = max(left.y, right.y)
+    inter_x1 = min(left_x1, right_x1)
+    inter_y1 = min(left_y1, right_y1)
+    inter_w = max(0, inter_x1 - inter_x0)
+    inter_h = max(0, inter_y1 - inter_y0)
+    intersection = inter_w * inter_h
+    if intersection <= 0:
+        return 0.0
+    left_area = max(1, left.width * left.height)
+    right_area = max(1, right.width * right.height)
+    union = left_area + right_area - intersection
+    return intersection / max(1, union)
+
+
+def _face_detection_center_distance(left: FaceDetection, right: FaceDetection) -> float:
+    left_cx = left.x + left.width / 2
+    left_cy = left.y + left.height / 2
+    right_cx = right.x + right.width / 2
+    right_cy = right.y + right.height / 2
+    dx = left_cx - right_cx
+    dy = left_cy - right_cy
+    return float((dx * dx + dy * dy) ** 0.5)
 
 
 def render_final_export(export_id: int) -> None:
@@ -513,6 +700,7 @@ def render_final_export(export_id: int) -> None:
         # Group detections by frame index for fast lookup during render.
         from collections import defaultdict
         per_frame: dict[int, list[BlurRegion]] = defaultdict(list)
+        allowed_per_frame: dict[int, list[BlurRegion]] = defaultdict(list)
         blur_decisions = {
             FaceDetection.Decision.UNKNOWN,
             FaceDetection.Decision.UNCERTAIN,
@@ -520,16 +708,23 @@ def render_final_export(export_id: int) -> None:
         }
         for det in latest_job.detections.select_related("override").iterator():
             effective = effective_detection_row(det)
+            region = BlurRegion(
+                x=effective.x,
+                y=effective.y,
+                width=effective.width,
+                height=effective.height,
+                score=effective.score,
+            )
+            if effective.decision == FaceDetection.Decision.ALLOWED:
+                allowed_per_frame[det.frame_index].append(region)
+                continue
             if effective.decision in blur_decisions:
-                per_frame[det.frame_index].append(
-                    BlurRegion(
-                        x=effective.x,
-                        y=effective.y,
-                        width=effective.width,
-                        height=effective.height,
-                        score=effective.score,
-                    )
-                )
+                per_frame[det.frame_index].append(region)
+        nested_ignored = 0
+        for frame_index, regions in list(per_frame.items()):
+            filtered = _filter_blur_regions_inside_allowed(regions, allowed_per_frame.get(frame_index, []))
+            nested_ignored += len(regions) - len(filtered)
+            per_frame[frame_index] = filtered
         fps_for_manual = source.fps or 30.0
         manual_regions = list(project.manual_blur_regions.all())
         for manual in manual_regions:
@@ -547,6 +742,8 @@ def render_final_export(export_id: int) -> None:
         raw_frames = len(per_frame)
         raw_regions = sum(len(v) for v in per_frame.values())
         _append_export_log(export, f"Loaded {raw_regions} blur regions across {raw_frames} frames.")
+        if nested_ignored:
+            _append_export_log(export, f"Ignored {nested_ignored} blur region(s) contained inside allowed faces.")
         if manual_regions:
             _append_export_log(export, f"Included {len(manual_regions)} manual blur segment(s).")
         per_frame = _densify_blur_regions(per_frame)
@@ -922,6 +1119,30 @@ def _merge_regions(primary: list[BlurRegion], secondary: list[BlurRegion]) -> li
     return _dedupe_regions(merged)
 
 
+def _filter_blur_regions_inside_allowed(
+    blur_regions: list[BlurRegion],
+    allowed_regions: list[BlurRegion],
+) -> list[BlurRegion]:
+    if not blur_regions or not allowed_regions:
+        return blur_regions
+
+    kept: list[BlurRegion] = []
+    for blur in blur_regions:
+        if any(_region_is_contained_in_allowed(blur, allowed) for allowed in allowed_regions):
+            continue
+        kept.append(blur)
+    return kept
+
+
+def _region_is_contained_in_allowed(blur: BlurRegion, allowed: BlurRegion) -> bool:
+    blur_area = max(1, blur.width * blur.height)
+    allowed_area = max(1, allowed.width * allowed.height)
+    if allowed_area < blur_area * settings.BLUR_IGNORE_INSIDE_ALLOWED_AREA_RATIO:
+        return False
+    overlap = _region_intersection_area(blur, allowed) / blur_area
+    return overlap >= settings.BLUR_IGNORE_INSIDE_ALLOWED_OVERLAP
+
+
 def _dedupe_regions(regions: list[BlurRegion]) -> list[BlurRegion]:
     deduped: list[BlurRegion] = []
     for region in sorted(regions, key=lambda item: item.score, reverse=True):
@@ -936,6 +1157,16 @@ def _region_overlaps(region: BlurRegion, others: list[BlurRegion], threshold: fl
 
 
 def _region_iou(left: BlurRegion, right: BlurRegion) -> float:
+    intersection = _region_intersection_area(left, right)
+    if intersection <= 0:
+        return 0.0
+    left_area = max(1, left.width * left.height)
+    right_area = max(1, right.width * right.height)
+    union = left_area + right_area - intersection
+    return intersection / max(1, union)
+
+
+def _region_intersection_area(left: BlurRegion, right: BlurRegion) -> int:
     left_x1 = left.x + left.width
     left_y1 = left.y + left.height
     right_x1 = right.x + right.width
@@ -947,13 +1178,7 @@ def _region_iou(left: BlurRegion, right: BlurRegion) -> float:
     inter_y1 = min(left_y1, right_y1)
     inter_w = max(0, inter_x1 - inter_x0)
     inter_h = max(0, inter_y1 - inter_y0)
-    intersection = inter_w * inter_h
-    if intersection <= 0:
-        return 0.0
-    left_area = max(1, left.width * left.height)
-    right_area = max(1, right.width * right.height)
-    union = left_area + right_area - intersection
-    return intersection / max(1, union)
+    return inter_w * inter_h
 
 
 def _region_center_distance(left: BlurRegion, right: BlurRegion) -> float:

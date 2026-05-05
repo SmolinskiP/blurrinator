@@ -86,15 +86,25 @@ MEDIA_ROOT = STORAGE_ROOT / "media"
 MEDIA_URL = "/media/"
 
 # Cosine-similarity threshold for SFace matches. SFace cosine of ~0.363 is the
-# OpenCV recommended threshold; we keep it conservative on purpose because the
-# default privacy decision is to blur, not to reveal.
-FACE_MATCH_THRESHOLD = float(os.environ.get("BLURRINATOR_FACE_MATCH_THRESHOLD", "0.45"))
+# OpenCV recommended threshold; 0.40 keeps a privacy margin without causing as
+# many frame-by-frame identity drops on real footage.
+FACE_MATCH_THRESHOLD = float(os.environ.get("BLURRINATOR_FACE_MATCH_THRESHOLD", "0.40"))
+FACE_MATCH_CANDIDATE_THRESHOLD = float(os.environ.get("BLURRINATOR_FACE_MATCH_CANDIDATE_THRESHOLD", "0.34"))
 FACE_CONFLICT_MARGIN = float(os.environ.get("BLURRINATOR_FACE_CONFLICT_MARGIN", "0.05"))
 FACE_DETECTOR_SCORE = float(os.environ.get("BLURRINATOR_FACE_DETECTOR_SCORE", "0.62"))
 FACE_MIN_SIZE_PX = int(os.environ.get("BLURRINATOR_FACE_MIN_SIZE_PX", "24"))
 FACE_ASPECT_MIN = float(os.environ.get("BLURRINATOR_FACE_ASPECT_MIN", "0.65"))
 FACE_ASPECT_MAX = float(os.environ.get("BLURRINATOR_FACE_ASPECT_MAX", "1.55"))
+FACE_LANDMARK_BOX_PADDING = float(os.environ.get("BLURRINATOR_FACE_LANDMARK_BOX_PADDING", "0.08"))
+FACE_LANDMARK_MIN_VERTICAL_SPAN = float(os.environ.get("BLURRINATOR_FACE_LANDMARK_MIN_VERTICAL_SPAN", "0.18"))
+FACE_LANDMARK_MIN_EYE_SPAN = float(os.environ.get("BLURRINATOR_FACE_LANDMARK_MIN_EYE_SPAN", "0.16"))
+FACE_LANDMARK_MIN_MOUTH_SPAN = float(os.environ.get("BLURRINATOR_FACE_LANDMARK_MIN_MOUTH_SPAN", "0.12"))
+FACE_LANDMARK_NOSE_MOUTH_TOLERANCE = float(os.environ.get("BLURRINATOR_FACE_LANDMARK_NOSE_MOUTH_TOLERANCE", "0.12"))
 ANALYSIS_FRAME_STRIDE = int(os.environ.get("BLURRINATOR_FRAME_STRIDE", "1"))
+FACE_TRACK_MAX_GAP = int(os.environ.get("BLURRINATOR_FACE_TRACK_MAX_GAP", "8"))
+FACE_TRACK_MIN_ALLOWED_VOTES = int(os.environ.get("BLURRINATOR_FACE_TRACK_MIN_ALLOWED_VOTES", "2"))
+FACE_TRACK_MIN_ALLOWED_RATIO = float(os.environ.get("BLURRINATOR_FACE_TRACK_MIN_ALLOWED_RATIO", "0.35"))
+FACE_TRACK_MIN_CANDIDATE_RATIO = float(os.environ.get("BLURRINATOR_FACE_TRACK_MIN_CANDIDATE_RATIO", "0.60"))
 BLUR_TEMPORAL_GAP = int(os.environ.get("BLURRINATOR_BLUR_TEMPORAL_GAP", "5"))
 BLUR_MARGIN_FACTOR = float(os.environ.get("BLURRINATOR_BLUR_MARGIN_FACTOR", "0.45"))
 # Asymmetric padding so the bbox actually covers hair (top), ears (sides) and chin (bottom).
@@ -104,11 +114,14 @@ BLUR_MARGIN_BOTTOM_FACTOR = float(os.environ.get("BLURRINATOR_BLUR_MARGIN_BOTTOM
 BLUR_TRACK_TTL = int(os.environ.get("BLURRINATOR_BLUR_TRACK_TTL", "12"))
 BLUR_TRACK_MATCH_THRESHOLD = float(os.environ.get("BLURRINATOR_BLUR_TRACK_MATCH", "0.40"))
 BLUR_TRACK_SEARCH_FACTOR = float(os.environ.get("BLURRINATOR_BLUR_TRACK_SEARCH", "1.50"))
+BLUR_IGNORE_INSIDE_ALLOWED_OVERLAP = float(os.environ.get("BLURRINATOR_BLUR_IGNORE_INSIDE_ALLOWED_OVERLAP", "0.85"))
+BLUR_IGNORE_INSIDE_ALLOWED_AREA_RATIO = float(os.environ.get("BLURRINATOR_BLUR_IGNORE_INSIDE_ALLOWED_AREA_RATIO", "1.8"))
 # Multi-scale face detection — extra downsampled passes catch huge close-up faces
 # that YuNet's anchor pyramid misses at native resolution.
 FACE_DETECT_SCALES = tuple(
     float(s) for s in os.environ.get("BLURRINATOR_FACE_DETECT_SCALES", "1.0,0.5,0.25").split(",")
 )
+FACE_MULTISCALE_MIN_SIZE_PX = int(os.environ.get("BLURRINATOR_FACE_MULTISCALE_MIN_SIZE_PX", "160"))
 
 MAX_UPLOAD_BYTES = int(os.environ.get("BLURRINATOR_MAX_UPLOAD_BYTES", 80 * 1024**3))
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024

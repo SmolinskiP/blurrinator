@@ -93,10 +93,14 @@ class FaceDetector:
         downscaled passes catch close-up faces that exceed YuNet's largest
         anchor box at native resolution; the native pass keeps small/distant
         faces intact."""
+        from django.conf import settings
+
         h, w = frame.shape[:2]
         all_faces: list[RawFace] = []
+        min_scaled_short_edge = max(1, int(settings.FACE_MULTISCALE_MIN_SIZE_PX))
         for scale in scales:
-            if abs(scale - 1.0) < 1e-6:
+            native_scale = abs(scale - 1.0) < 1e-6
+            if native_scale:
                 all_faces.extend(self.detect(frame))
                 continue
             sw = max(64, int(round(w * scale)))
@@ -104,6 +108,8 @@ class FaceDetector:
             small = cv2.resize(frame, (sw, sh), interpolation=cv2.INTER_AREA)
             for face in self.detect(small):
                 inv = 1.0 / scale
+                if min(face.w * inv, face.h * inv) < min_scaled_short_edge:
+                    continue
                 scaled_row = face.raw_row.copy()
                 scaled_row[:14] = scaled_row[:14] * inv
                 all_faces.append(
@@ -117,28 +123,48 @@ class FaceDetector:
                         raw_row=scaled_row,
                     )
                 )
-        return _nms_faces(all_faces, iou_threshold=0.4)
+        return _nms_faces(all_faces, iou_threshold=0.4, overlap_threshold=0.78)
 
 
-def _nms_faces(faces: list[RawFace], iou_threshold: float = 0.4) -> list[RawFace]:
+def _nms_faces(
+    faces: list[RawFace],
+    iou_threshold: float = 0.4,
+    overlap_threshold: float = 0.78,
+) -> list[RawFace]:
     sorted_faces = sorted(faces, key=lambda f: f.score, reverse=True)
     kept: list[RawFace] = []
     for f in sorted_faces:
-        if any(_face_iou(f, k) >= iou_threshold for k in kept):
+        if any(
+            _face_iou(f, k) >= iou_threshold
+            or _face_overlap_ratio(f, k) >= overlap_threshold
+            for k in kept
+        ):
             continue
         kept.append(f)
     return kept
 
 
 def _face_iou(a: RawFace, b: RawFace) -> float:
+    inter = _face_intersection_area(a, b)
+    if inter == 0:
+        return 0.0
+    union = a.w * a.h + b.w * b.h - inter
+    return inter / max(1, union)
+
+
+def _face_overlap_ratio(a: RawFace, b: RawFace) -> float:
+    inter = _face_intersection_area(a, b)
+    if inter == 0:
+        return 0.0
+    smaller_area = min(a.w * a.h, b.w * b.h)
+    return inter / max(1, smaller_area)
+
+
+def _face_intersection_area(a: RawFace, b: RawFace) -> int:
     ax2, ay2 = a.x + a.w, a.y + a.h
     bx2, by2 = b.x + b.w, b.y + b.h
     ix1, iy1 = max(a.x, b.x), max(a.y, b.y)
     ix2, iy2 = min(ax2, bx2), min(ay2, by2)
     iw = max(0, ix2 - ix1)
     ih = max(0, iy2 - iy1)
-    inter = iw * ih
-    if inter == 0:
-        return 0.0
-    union = a.w * a.h + b.w * b.h - inter
-    return inter / max(1, union)
+    return iw * ih

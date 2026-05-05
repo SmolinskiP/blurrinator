@@ -37,6 +37,8 @@
             <span class="chip">blur {{ counts.unknown|default:0 }}</span>
             <span class="chip">uncertain {{ counts.uncertain|default:0 }}</span>
             <span class="chip">conflict {{ counts.conflict|default:0 }}</span>
+            <span class="chip">likely matches {{ likely_match_count }}</span>
+            <span class="chip">likely falses {{ likely_false_count }}</span>
             <span class="chip">manual overrides {{ override_count }}</span>
             <span class="chip">manual blurs {{ manual_regions|length }}</span>
         </div>
@@ -190,7 +192,10 @@
             <div class="review-filters">
                 <button type="button" class="btn btn-sm btn-ghost is-active" data-filter="all">All</button>
                 <button type="button" class="btn btn-sm btn-ghost" data-filter="flagged">Flagged</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-filter="likely">Likely matches</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-filter="false">Likely falses</button>
                 <button type="button" class="btn btn-sm btn-ghost" data-filter="override">Overrides</button>
+                <button type="button" class="btn btn-sm btn-ghost" data-select-visible>Select visible</button>
                 <button type="button" class="btn btn-sm btn-ghost" data-clear-selection>Clear</button>
                 <button type="submit" class="btn btn-sm btn-primary" data-bulk-submit disabled>Allow selected</button>
             </div>
@@ -213,6 +218,8 @@
                         data-auto-label="{{ row.auto_decision_label }}"
                         data-effective-decision="{{ row.effective_decision }}"
                         data-effective-label="{{ row.effective_decision_label }}"
+                        data-likely-match="{% if row.likely_match %}1{% else %}0{% endif %}"
+                        data-likely-false="{% if row.likely_false %}1{% else %}0{% endif %}"
                         data-x="{{ row.x }}"
                         data-y="{{ row.y }}"
                         data-width="{{ row.width }}"
@@ -224,21 +231,33 @@
                             <input type="checkbox" name="detection_ids" value="{{ row.id }}" data-detection-checkbox>
                         </label>
                         <button type="button" class="review-detection-select" data-detection-select>
-                            <div class="review-detection-head">
-                                <span class="detection-time">{{ row.timestamp_label }}</span>
-                                <span class="status-pill {% if row.effective_decision == 'allowed' %}done{% elif row.effective_decision == 'unknown' %}failed{% else %}queued{% endif %}">
-                                    {{ row.effective_decision_label }}
-                                </span>
+                            <div class="review-detection-row">
+                                <div class="review-detection-thumb" aria-hidden="true">
+                                    <img
+                                        alt=""
+                                        class="review-detection-thumb-image"
+                                        data-thumb-image
+                                        data-thumb-url="{% url 'projects:detection_thumbnail' project.slug row.id %}"
+                                    >
+                                </div>
+                                <div class="review-detection-copy">
+                                    <div class="review-detection-head">
+                                        <span class="detection-time">{{ row.timestamp_label }}</span>
+                                        <span class="status-pill {% if row.effective_decision == 'allowed' %}done{% elif row.effective_decision == 'unknown' %}failed{% else %}queued{% endif %}">
+                                            {{ row.effective_decision_label }}
+                                        </span>
+                                    </div>
+                                    <div class="review-detection-meta">
+                                        frame {{ row.frame_index }} · {{ row.width }}×{{ row.height }} at {{ row.x }},{{ row.y }}
+                                    </div>
+                                    <div class="review-detection-meta">
+                                        score {{ row.score|floatformat:2 }}{% if row.similarity %} · sim {{ row.similarity|floatformat:2 }}{% endif %}{% if row.matched_person %} · {{ row.matched_person }}{% endif %}
+                                    </div>
+                                    {% if row.has_override %}
+                                        <div class="review-detection-meta review-detection-override">Manual override active</div>
+                                    {% endif %}
+                                </div>
                             </div>
-                            <div class="review-detection-meta">
-                                frame {{ row.frame_index }} · {{ row.width }}×{{ row.height }} at {{ row.x }},{{ row.y }}
-                            </div>
-                            <div class="review-detection-meta">
-                                score {{ row.score|floatformat:2 }}{% if row.similarity %} · sim {{ row.similarity|floatformat:2 }}{% endif %}{% if row.matched_person %} · {{ row.matched_person }}{% endif %}
-                            </div>
-                            {% if row.has_override %}
-                                <div class="review-detection-meta review-detection-override">Manual override active</div>
-                            {% endif %}
                         </button>
                     </div>
                 {% empty %}
@@ -278,8 +297,10 @@
     const overrideChip = form.querySelector("[data-editor-override]");
     const filterButtons = Array.from(document.querySelectorAll("[data-filter]"));
     const detectionCheckboxes = Array.from(document.querySelectorAll("[data-detection-checkbox]"));
+    const detectionThumbs = Array.from(document.querySelectorAll("[data-thumb-image]"));
     const bulkSubmit = document.querySelector("[data-bulk-submit]");
     const clearSelectionButton = document.querySelector("[data-clear-selection]");
+    const selectVisibleButton = document.querySelector("[data-select-visible]");
     const manualItems = Array.from(document.querySelectorAll("[data-manual-item]"));
     const manualFields = {
         start: manualForm.querySelector("[data-manual-field='start_seconds']"),
@@ -342,6 +363,7 @@
         selectedItem?.classList.remove("is-selected");
         selectedItem = item;
         item.classList.add("is-selected");
+        loadThumb(item.querySelector("[data-thumb-image]"));
         activeBoxSource = "detection";
         emptyState.hidden = true;
         form.hidden = false;
@@ -475,10 +497,14 @@
         });
         items.forEach((item) => {
             const flagged = item.dataset.effectiveDecision !== "allowed";
+            const likely = item.dataset.likelyMatch === "1";
+            const likelyFalse = item.dataset.likelyFalse === "1";
             const overridden = item.dataset.hasOverride === "1";
             const visible =
                 name === "all" ||
                 (name === "flagged" && flagged) ||
+                (name === "likely" && likely) ||
+                (name === "false" && likelyFalse) ||
                 (name === "override" && overridden);
             item.hidden = !visible;
         });
@@ -487,6 +513,32 @@
     const isVisibleItem = (item) => {
         return item.offsetParent !== null && !item.hidden;
     };
+
+    const loadThumb = (img) => {
+        if (!img || img.dataset.loaded === "1") {
+            return;
+        }
+        img.src = img.dataset.thumbUrl;
+        img.dataset.loaded = "1";
+    };
+
+    if ("IntersectionObserver" in window) {
+        const thumbObserver = new IntersectionObserver((entries) => {
+            entries.forEach((entry) => {
+                if (!entry.isIntersecting) {
+                    return;
+                }
+                loadThumb(entry.target);
+                thumbObserver.unobserve(entry.target);
+            });
+        }, {
+            root: document.querySelector("[data-bulk-form] .review-list"),
+            rootMargin: "240px 0px",
+        });
+        detectionThumbs.forEach((img) => thumbObserver.observe(img));
+    } else {
+        detectionThumbs.slice(0, 40).forEach((img) => loadThumb(img));
+    }
 
     const syncBulkState = () => {
         const selected = detectionCheckboxes.filter((checkbox) => checkbox.checked).length;
@@ -508,13 +560,20 @@
         });
         syncBulkState();
     });
+    selectVisibleButton?.addEventListener("click", () => {
+        detectionCheckboxes.forEach((checkbox) => {
+            const item = checkbox.closest("[data-detection-item]");
+            checkbox.checked = Boolean(item && isVisibleItem(item) && item.dataset.effectiveDecision !== "allowed");
+        });
+        syncBulkState();
+    });
 
     filterButtons.forEach((button) => {
         button.addEventListener("click", () => applyFilter(button.dataset.filter));
     });
     syncBulkState();
 
-    applyFilter("flagged");
+    applyFilter("{% if likely_false_count %}false{% elif likely_match_count %}likely{% else %}flagged{% endif %}");
     const hashTarget = window.location.hash ? document.querySelector(window.location.hash) : null;
     if (hashTarget && hashTarget.matches("[data-manual-item]")) {
         setManualFromDataset(hashTarget);

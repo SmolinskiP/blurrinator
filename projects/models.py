@@ -154,6 +154,7 @@ class FaceDetection(models.Model):
         related_name="matches",
     )
     similarity = models.FloatField(null=True, blank=True)
+    landmark_implausible = models.BooleanField(default=False)
     decision = models.CharField(max_length=16, choices=Decision.choices, default=Decision.UNKNOWN)
 
     class Meta:

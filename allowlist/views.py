@@ -65,6 +65,16 @@ def person_upload(request, pk: int):
 
 
 @require_POST
+def person_toggle_active(request, pk: int):
+    person = get_object_or_404(AllowedPerson, pk=pk)
+    person.is_active = not person.is_active
+    person.save(update_fields=["is_active"])
+    state = "activated" if person.is_active else "deactivated"
+    messages.success(request, f"{person.display_name} {state}.")
+    return redirect(request.POST.get("next") or reverse("allowlist:detail", args=[person.pk]))
+
+
+@require_POST
 def person_delete(request, pk: int):
     person = get_object_or_404(AllowedPerson, pk=pk)
     name = person.display_name
