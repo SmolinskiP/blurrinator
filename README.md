@@ -4,6 +4,14 @@ Local Django web app for privacy redaction in YouTube videos. Originals never le
 
 Current slice: project upload, SHA-256 + FFprobe metadata, model registry, allowlist scaffold, in-DB job queue, completed face analysis, manual draft review overrides, and final redaction export.
 
+## Video
+
+<p align="center">
+  <a href="https://youtu.be/4deU0rPMxpg">
+    <img src="https://img.youtube.com/vi/4deU0rPMxpg/maxresdefault.jpg" alt="Blurrinator demo video" width="800" />
+  </a>
+</p>
+
 ## What It Uses
 
 Blurrinator currently uses OpenCV-based face analysis, not Ultralytics YOLO.
